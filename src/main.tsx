@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+// eslint-disable-next-line import/no-unresolved
 import './styles/global.css';
 import { App } from './App';
 

@@ -139,7 +139,7 @@ export async function getModelDetails(modelId: string): Promise<HFModelInfo> {
   }
 }
 
-// ─── Model download management (resumable) ──────────────
+// ─── Model download management (resumable) — Fix #7: Added timeout + immediate error handler ──────────────
 export async function downloadModel(modelId: string, fileName?: string): Promise<DownloadProgress> {
   const session = await checkHFAuth();
   if (!session?.token) return { modelId, fileName: fileName || '*', downloadedBytes: 0, totalBytes: 0, speedMBps: 0, etaSeconds: -1, status: 'failed', error: 'No HF auth token' };
@@ -163,6 +163,17 @@ export async function downloadModel(modelId: string, fileName?: string): Promise
     let speedMBps = 0;
     const startTime = Date.now();
 
+    // Fix #7: Immediate error handler — catches failures before stdout emits any data
+    proc.on('error', (err) => {
+      resolve({ modelId, fileName: targetFile, downloadedBytes, totalBytes, speedMBps, etaSeconds: -1, status: 'failed', error: `Spawn error: ${err.message}` });
+    });
+
+    // Fix #7: Timeout handler — downloads that hang indefinitely will be aborted after 30 minutes
+    const timeoutId = setTimeout(() => {
+      proc.kill();
+      resolve({ modelId, fileName: targetFile, downloadedBytes, totalBytes, speedMBps, etaSeconds: -1, status: 'failed', error: 'Download timed out after 30 minutes' });
+    }, 30 * 60 * 1000); // 30 minutes
+
     proc.stdout.on('data', (d: Buffer) => {
       const output = d.toString();
       // Parse download progress lines from huggingface-cli
@@ -174,21 +185,28 @@ export async function downloadModel(modelId: string, fileName?: string): Promise
       }
     });
 
+    proc.stderr.on('data', (d: Buffer) => {
+      // Log stderr for debugging download errors
+      const errOutput = d.toString().trim();
+      if (errOutput.includes('Error') || errOutput.includes('error')) {
+        // Clear timeout and resolve with error immediately on detected error
+        clearTimeout(timeoutId);
+        resolve({ modelId, fileName: targetFile, downloadedBytes, totalBytes, speedMBps, etaSeconds: -1, status: 'failed', error: errOutput });
+      }
+    });
+
     proc.on('close', (code) => {
+      clearTimeout(timeoutId); // Always clear timeout on process close
       if (code === 0 || downloadedBytes > 0) {
         resolve({
           modelId, fileName: targetFile,
           downloadedBytes, totalBytes, speedMBps,
-          etaSeconds: totalBytes > downloadedBytes ? Math.round((totalBytes - downloadedBytes) / (speedMBps * 1048576)) : 0,
+          etaSeconds: totalBytes > downloadedBytes && speedMBps > 0 ? Math.round((totalBytes - downloadedBytes) / (speedMBps * 1048576)) : 0,
           status: 'completed',
         });
       } else {
         resolve({ modelId, fileName: targetFile, downloadedBytes, totalBytes, speedMBps, etaSeconds: -1, status: 'failed', error: `Exit code ${code}` });
       }
-    });
-
-    proc.on('error', (err) => {
-      resolve({ modelId, fileName: targetFile, downloadedBytes, totalBytes, speedMBps, etaSeconds: -1, status: 'failed', error: err.message });
     });
   });
 }
@@ -246,9 +264,17 @@ async function getModelFileList(modelId: string): Promise<string> {
   if (session?.token) headers['Authorization'] = `Bearer ${session.token}`;
 
   try {
-    const res = await axios.get(`${HUGGINGFACE_API}/models/${modelId}/tree/main`, { headers });
-    const files = (res.data as any[]).filter((f: any) => f.path.endsWith('.gguf'));
-    return files[0]?.path || 'model.gguf';
+    // Try common branch names since repos may use 'main', 'master', or other defaults
+    for (const branch of ['main', 'master']) {
+      try {
+        const res = await axios.get(`${HUGGINGFACE_API}/models/${modelId}/tree/${branch}`, { headers });
+        const files = (res.data as any[]).filter((f: any) => f.path.endsWith('.gguf'));
+        if (files.length > 0) return files[0].path;
+      } catch {
+        // Try next branch
+      }
+    }
+    return 'model.gguf';
   } catch {
     return 'model.gguf';
   }
@@ -257,7 +283,14 @@ async function getModelFileList(modelId: string): Promise<string> {
 // ─── HuggingFace CLI install helper ──────────────
 export async function installHFCLI(): Promise<boolean> {
   return new Promise((resolve) => {
-    const proc = spawn('curl', ['-LsSf', 'https://hf.co/cli/install.sh', '|', 'bash'], { env: process.env, shell: true });
+    // On Windows, use PowerShell to download and run the installer; on Unix, pipe curl to bash
+    let cmd: string;
+    if (process.platform === 'win32') {
+      cmd = 'powershell -Command "Invoke-WebRequest -Uri \'https://hf.co/cli/install.sh\' -OutFile \"$env:TEMP\\hf_install.sh\"; bash \"$env:TEMP\\hf_install.sh\""';
+    } else {
+      cmd = 'curl -LsSf https://hf.co/cli/install.sh | bash';
+    }
+    const proc = spawn(cmd, [], { env: process.env, shell: true });
     let output = '';
     proc.stdout.on('data', (d: Buffer) => { output += d.toString(); });
     proc.stderr.on('data', () => {}); // suppress error noise

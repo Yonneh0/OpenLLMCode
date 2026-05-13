@@ -99,13 +99,14 @@ export function gitRestoreToCheckpoint(checkpointHash: string): boolean {
 // Auto-commit after a successful tool call (e.g., file write)
 export function autoCommitAfterAction(
   actionType: string,
-  filePath?: string
+  filePath?: string,
+  projectPath?: string
 ): boolean {
   const message = `OpenLLMCode: ${actionType}${filePath ? ' — ' + filePath : ''}`;
 
   // Get current state before commit
-  const status = getGitStatus();
+  const status = getGitStatus(projectPath || process.cwd());
   if (status.staged.length === 0) return true; // nothing to commit
 
-  return gitCommit(message);
+  return gitCommit(message, projectPath);
 }

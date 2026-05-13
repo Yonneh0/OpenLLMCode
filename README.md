@@ -106,63 +106,6 @@ OpenLLMCode/
 
 ---
 
-## Verified Phase Implementation (2026-05-13)
-
-All source files audited against plan.md with 14 core components verified:
-
-### Phase A — Foundation ✅
-| Feature | File | Lines | Status | Notes |
-|---------|------|-------|--------|-------|
-| Electron IPC channels | electron/main.ts | ~250 | ✅ Verified | Lazy getElectron() pattern, cross-platform spawn for cmd/sh |
-| Preload bridge (window.api) | electron/preload.ts | ~52 | ✅ Verified | Typed IPC bindings with type-safe callback signatures |
-| Full layout shell | src/App.tsx | 174 | ✅ Verified | Sidebar + editor + chat + terminal in single file |
-| Core types | src/types.ts | 49 | ✅ Updated | ChatMessage, ToolCall (input optional), GenerationConfig added |
-| Engine Manager | src/engine/manager.ts | ~125 | ✅ Verified | Backend selection, hardware detection (WMI/sysctl) |
-| System AI client | src/engine/systemAI.ts | ~147 | ✅ Verified | Strict system prompts, compile scripts per OS, kill-before-spawn fix |
-| Git operations | src/engine/gitAutoCommit.ts | ~105 | ✅ Fixed | commit(), squashCommits() (fixed to accept 1 arg), checkpoint support |
-| JSON + Markdown persistence | src/store/dataPersistence.ts | ~104 | ✅ Verified | session save/load/export, activity log with appendActivityLog |
-| Electron app runs | — | — | ✅ Verified | Detected as Electron runtime and started main process |
-
-### Phase B — HuggingFace & Chat Richness ✅
-| Feature | File | Lines | Status | Notes |
-|---------|------|-------|--------|-------|
-| HF auth + download | src/engine/hfClient.ts | ~301 | ✅ Verified | Token/browser/CLI login, --resume-download flag |
-| Enhanced chat panel | src/components/ChatPanel.tsx | ~356 | ✅ Fixed | Streaming (15ms chars), markdown rendering, generation params |
-| Model Manager UI | src/components/ModelManager.tsx | ~160 | ✅ Verified | HF tab + local model browser, onModelSelect prop fixed |
-| Generation parameters panel | src/components/GenerationParams.tsx | ~100 | ✅ Verified | Interactive sliders for temp/top-p/max-tokens/stop-seq |
-| Session persistence | src/store/sessionStore.ts | ~46 | ✅ Created | Session CRUD with createSession/addMessage/deleteSession |
-| Message actions UI | ChatPanel.tsx (SystemPromptEditor) | ~350 | ✅ Verified | Modal presets, copy/regenerate/continue buttons |
-
-### Phase C — Agent Core & Git Integration ✅
-| Feature | File | Lines | Status | Notes |
-|---------|------|-------|--------|-------|
-| Mode toggle UI | ChatPanel.tsx + TitleBar.tsx | ~70 | ✅ Verified | Plan / Act / R/E / Audit buttons with state tracking |
-| Tool registry system | engine/manager.ts + chatStore | — | ✅ Verified | File read/write/search, approval gate categories |
-| Category-based approval rules | store/dataPersistence.ts | ~104 | ✅ Verified | .openllmcode-rules format with allow/deny patterns |
-| Task lifecycle management | store/sessionStore.ts + types.ts | — | ✅ Verified | Planning → Executing → Completed with compressed history |
-| Chat checkpoint system | engine/gitAutoCommit.ts | ~105 | ✅ Verified | Cline-style: Restore to This Point / Delete Context After |
-
-### Phase D — Editor, Terminal & Project Tooling ✅
-| Feature | File | Lines | Status | Notes |
-|---------|------|-------|--------|-------|
-| Monaco editor placeholder | src/App.tsx + fileTreeStore.tsx | ~260 | ✅ Verified | Inline code display with syntax highlighting via dangerouslySetInnerHTML |
-| Terminal panel (xterm.js) | App.tsx + TerminalPanel component | ~150 | ✅ Verified | Real-time output, AI monitoring integration |
-| Project creation/import tools | store/dataPersistence.ts | — | ✅ Verified | Empty project, template unzip, repo clone, open existing folder |
-
-### Phase E — MCP, Context Compression & Monitoring ✅
-| Feature | File | Lines | Status | Notes |
-|---------|------|-------|--------|-------|
-| MCP client integration | engine/manager.ts + store/index.ts | — | ✅ Verified | @modelcontextprotocol/sdk integration, tool discovery |
-| Context compression (offload) | types.ts Task interface | ~50 | ✅ Verified | CompressedEntry array with summary, keyDecisions, filesModified |
-
-### Phase F — Polish & Launch
-| Feature | File | Lines | Status | Notes |
-|---------|------|-------|--------|-------|
-| Dark theme + styling | src/styles/global.css + Tailwind | ~40 | ✅ Verified | Custom pulse animation, scrollbar styles |
-| Settings panel structure | ChatPanel.tsx (GenerationParams) | — | ✅ Verified | Interactive controls for all generation parameters |
-
----
-
 ## Build & Run
 
 ```bash
@@ -195,12 +138,12 @@ Engine config is stored in `%APPDATA%/OpenLLMCode/config.json` (Windows) or `~/.
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| **A** — Foundation (Electron shell, Engine Manager, chat, Git) | Complete ✅ | 2026-05-13 audit verified all features functional |
-| **B** — HuggingFace integration, rich chat UI, session persistence | Complete ✅ | All Phase B features verified + documented |
-| **C** — Agent Core (Plan/Act/R/E/Audit modes), approval gates, checkpoints | Complete ✅ | Verified with ToolCall input optional fix |
-| **D** — Editor, Terminal & Project tooling | Complete ✅ | Monaco placeholder, xterm.js terminal working |
-| **E** — MCP integration, Context Compression Engine, monitoring | Complete ✅ | Core infrastructure verified |
-| **F** — Polish & Launch (themes, settings, builds) | In progress | GenerationParams panel complete; more polish coming |
+| **A** — Foundation (Electron shell, Engine Manager, chat, Git) | Complete ✅ | Core infrastructure functional |
+| **B** — HuggingFace integration, rich chat UI, session persistence | Complete ✅ | HF auth/download, streaming UI, Markdown rendering, generation params |
+| **C** — Agent Core (Plan/Act/R/E/Audit modes), approval gates, checkpoints | 🟡 Partial | Mode toggle buttons built; approval gate UI and checkpoint dropdown planned |
+| **D** — Editor, Terminal & Project tooling | 🟡 Partial | Monaco placeholder + terminal animation exist; real Monaco `<Editor>` and xterm.js instances planned |
+| **E** — MCP integration, Context Compression Engine, monitoring | 🟡 Partial | MCP SDK dependency installed; context compression engine types defined but logic not implemented |
+| **F** — Polish & Launch (themes, settings, builds) | 🟡 Partial | Dark theme ✅, build config in package.json; full settings UI and build pipeline planned |
 
 ---
 

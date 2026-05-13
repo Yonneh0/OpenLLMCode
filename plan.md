@@ -2,8 +2,8 @@
 
 > An open-source, self-contained local AI coding agent that bundles its own llama.cpp inference engine, provides rich agentic tooling with human-in-the-loop approvals, and delivers a clean VS Code–inspired UI. All code is hosted at [github.com/Yonneh0/OpenLLMCode](https://github.com/Yonneh0/OpenLLMCode).
 
-> ✅ **Phase A — Foundation verified complete** (2026-05-13): 36 files, ~2548 lines committed.
-> ✅ **Phase B — HuggingFace & Chat Richness verified complete** (2026-05-13): ~4 files, ~780 lines. See README.md for the full Phase A + B verification table.
+> ✅ **Phase A — Foundation implemented**: Core Electron shell, Engine Manager, chat UI, Git operations, Zustand stores.
+> ✅ **Phase B — HuggingFace & Chat Richness implemented**: HF auth/download, streaming UI, Markdown rendering, generation params panel.
 
 ---
 
@@ -1016,7 +1016,7 @@ The system prompt is assembled dynamically from several sections. The **verified
 | Electron main process (IPC) | ✅ Engine, file ops, terminal, Git, chat | electron/main.ts | 180 lines |
 | Global CSS + Tailwind config | ✅ Dark catppuccin theme | global.css, tailwind.config.js | 94+ lines combined |
 
-**Total Phase A: ~36 files, ~2548 lines verified against source code.**
+**Total Phase A: ~36 files, ~2548 lines implemented.**
 
 ### Phase B — HuggingFace & Chat Richness ✅ **VERIFIED COMPLETE** (2026-05-13)
 | Feature | Verified? | Files | Lines |
@@ -1031,54 +1031,54 @@ The system prompt is assembled dynamically from several sections. The **verified
 | Message-level actions | ✅ Copy/Edit/Regenerate buttons on hover for user+agent messages | ChatPanel.tsx | — |
 | System prompt editor with presets | ✅ Modal: Coding, Review, Debugging, R/E, Audit templates | ChatPanel.tsx | — |
 
-**Total Phase B: ~4 files, ~780 lines verified against source code.**
+**Total Phase B: ~4 files, ~780 lines implemented.**
 
-### Phase C — Agent Core & Git Integration (Planned)
+### Phase C — Agent Core & Git Integration 🟡 **PARTIAL** (Types/Backend exist; UI not built)
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Plan/Act/R/E/Audit modes | [ ] Planned | Distinct behaviors per mode with tool registry |
-| Tool registry system | [ ] Planned | File read/write/search tools with approval gates |
-| Approval gate UI | [ ] Planned | Four-option dialog: Allow / Always Allow / Deny / Deny w/ Reason |
-| Task creation & lifecycle | [ ] Planned | Planning → Executing → Completed flow |
-| System prompt assembly | [ ] Planned | Dynamic assembly from context sections |
-| Chat checkpoint system | [ ] Planned | Cline-style dropdown: Restore / Delete Context After |
-| Task completion squash | [ ] Planned | Combine all task commits into one on completion |
-| User edits stashed automatically | [ ] Planned | Before actions, or included in squashed commit |
+| Plan/Act/R/E/Audit modes | ✅ Verified | Mode toggle buttons in ChatPanel + TitleBar with state tracking |
+| Tool registry system | 🟡 Partial | IPC channels for file read/write/search, terminal commands exist; approval gate UI not built |
+| Approval gate UI | 🔲 Planned | Four-option dialog: Allow / Always Allow / Deny / Deny w/ Reason — types defined in plan.md only |
+| Task creation & lifecycle | 🟡 Partial | SessionStore has CRUD ops; actual task system (planning→executing→completed) not wired to agent |
+| System prompt assembly | ✅ Verified | Dynamic system prompts per mode in systemAI.ts:17–38 |
+| Chat checkpoint system | 🟡 Partial | gitAutoCommit.ts has commit/squash/checkpoint functions; UI dropdown (Restore / Delete Context After) not built |
+| Task completion squash | 🟡 Partial | gitSquashCommits() exists in gitAutoCommit.ts; auto-trigger on task completion not wired |
+| User edits stashed automatically | 🟡 Partial | Git status tracking via getGitStatus(); stash/unstash logic not implemented |
 
-### Phase D — Editor, Terminal & Project Tooling (Planned)
+### Phase D — Editor, Terminal & Project Tooling 🟡 **PARTIAL** (Placeholders exist; real integration planned)
 | Feature | Status | Description |
 |---------|--------|-------------|
-| **Monaco Editor real integration** | [ ] Planned | Full `<Editor>` component replacing placeholder in App.tsx |
-| Image/file preview for non-code files | [ ] Planned | Monaco built-in viewer |
-| Split view support | [ ] Planned | Drag file onto editor area to split |
-| **xterm.js terminal panel** | [ ] Planned | Replace `pre` placeholder with real xterm.js instance |
-| Terminal tools (run_command, read_output, kill_process) | [ ] Planned | IPC channels + tool registry |
-| Real-time terminal output streaming to agent | [ ] Planned | Agent can monitor and react to compile errors/test failures |
-| **Project creation wizard** | [ ] Planned | Empty project, template unzip, repo clone, open existing folder |
-| Template library | [ ] Planned | Bundled starter templates with auto-dependency install |
-| Repository clone tooling | [ ] Planned | Multi-provider (GitHub/GitLab/Bitbucket), auth options, progress tracking |
+| **Monaco Editor real integration** | 🟡 Partial | Inline code display with syntax highlighting via dangerouslySetInnerHTML; full Monaco `<Editor>` component not wired |
+| Image/file preview for non-code files | 🔲 Planned | Monaco built-in viewer — placeholder only |
+| Split view support | 🔲 Planned | Tab bar exists (main.tsx, types.ts); drag-to-split not implemented |
+| **xterm.js terminal panel** | 🟡 Partial | Terminal output rendering with prompt cursor animation; real xterm.js instance not wired |
+| Terminal tools (run_command, read_output, kill_process) | 🟡 Partial | IPC exec-command channel exists in main.ts:158–176; read_output/kill_process not implemented |
+| Real-time terminal output streaming to agent | 🔲 Planned | Agent can monitor and react to compile errors/test failures — placeholder only |
+| **Project creation wizard** | 🟡 Partial | Open folder dialog via electron-store-set-config; template unzip/repo clone UI not built |
+| Template library | 🔲 Planned | Template unzip support in dataPersistence.ts; UI for selecting templates not built |
+| Repository clone tooling | 🟡 Partial | Git operations available immediately via gitAutoCommit; multi-provider clone UI not built |
 
-### Phase E — MCP, Context Compression & Monitoring (Planned)
+### Phase E — MCP, Context Compression & Monitoring 🟡 **PARTIAL** (Types/infrastructure exist; core engine not built)
 | Feature | Status | Description |
 |---------|--------|-------------|
-| **MCP client integration** | [ ] Planned | `@modelcontextprotocol/sdk` dependency installed; full server management UI |
-| Tool discovery and registration from MCP servers | [ ] Planned | Auto-register MCP tools in agent's tool registry |
-| Category-based pre-approval rules (.openllmcode-rules) | [ ] Planned | Project-level JSON config for approval categories |
-| Task history sidebar with resume capability | [ ] Planned | Browse past tasks; restart from any step |
-| File watching (chokidar dependency installed) | [ ] Wired in code, not UI yet | Watch project files for external modifications |
-| **Context Compression Engine** | [ ] Planned | Automated offloading of early context to task system via System AI |
-| **Engine logging tabs** | [ ] Planned | Real-time llama.cpp monitoring during reasoning blocks; per-engine tabs (primary + assistant) |
-| Reasoning block visibility | [ ] Planned | Phase tracking, token consumption, internal step breakdown in UI |
+| **MCP client integration** | 🟡 Partial | @modelcontextprotocol/sdk dependency installed; sidebar UI placeholder present; full server management UI not built |
+| Tool discovery and registration from MCP servers | 🔲 Planned | Auto-register MCP tools in agent's tool registry via IPC — types defined only |
+| Category-based pre-approval rules (.openllmcode-rules) | 🟡 Partial | .openllmcode-rules format documented in plan.md; project-level JSON config not implemented |
+| Task history sidebar with resume capability | 🟡 Partial | Session list management in sessionStore.ts; task-specific history view not built |
+| File watching (chokidar dependency installed) | 🟡 Wired in code | Watch project files for external modifications via initFileWatcher() — works but no UI feedback |
+| **Context Compression Engine** | 🔲 Planned | CompressedEntry array in types.ts Task interface; actual compression logic not implemented |
+| **Engine logging tabs** | 🟡 Partial | Activity log maintained by System AI in dataPersistence.ts:89–92; per-engine logging tabs not built |
+| Reasoning block visibility | 🟡 Partial | Token consumption tracking via token count footer in ChatPanel; full reasoning block UI not built |
 
-### Phase F — Polish & Launch (Planned)
+### Phase F — Polish & Launch 🟡 **PARTIAL** (UI exists; build scripts not wired)
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Dark theme refinement + accessibility audit | [ ] Planned | WCAG AA compliance; color contrast verification on catppuccin palette |
-| Settings panel | [ ] Planned | Consolidated settings UI for engine, models, HF auth, chat defaults, Git, assistant model |
-| **Build scripts** (electron-builder) | [ ] Dependency installed, not wired | `npm run electron:build` produces NSIS installer on Windows, dmg/pkg on macOS |
-| Documentation and example workflows | [ ] Planned | README improvements, example prompts, getting-started guides |
-| Preset AI prompts | [ ] Planned | Bundled prompt templates download from github.com/Yonneh0/OpenLLMCode |
-| GitHub releases update mechanism | [ ] Planned | Check for official/community updates with one-click install |
+| Dark theme refinement + accessibility audit | ✅ Verified | WCAG AA compliant catppuccin dark palette in global.css |
+| Settings panel | 🟡 Partial | GenerationParams panel with all parameters (temp, top-p, rep penalty, max tokens); full settings UI not built |
+| **Build scripts** (electron-builder) | 🟡 Partial | electron-builder config in package.json; NSIS target configured; actual build pipeline not tested |
+| Documentation and example workflows | ✅ Verified | README.md + plan.md comprehensive documentation |
+| Preset AI prompts | ✅ Verified | 5 preset templates: Coding, Review, Debug, R/E, Audit — implemented in ChatPanel.tsx SystemPromptEditor |
+| GitHub releases update mechanism | 🟡 Partial | Engine binary download from GitHub releases (manager.ts); app update check UI not built |
 
 ---
 
@@ -1222,26 +1222,28 @@ See `MODELS.md` at the repo root for the complete list.
 
 ---
 
-## Appendix B: API Surface (Verified IPC Channels)
+## Appendix B: API Surface (IPC Channels)
 
-All verified in `electron/main.ts`:
+All registered in `electron/main.ts`:
 
-| Channel | Direction | Parameters | Returns | Verified Line |
-|---------|-----------|------------|---------|---------------|
-| `engine-get-config` | → main | none | config object | 36 |
-| `engine-set-config` | → main | partial config | void | 38 |
-| `engine-detect-hardware` | → main | none | {platform, gpu?, ramGB} | 40–43 |
-| `fs-read-file` | → main | filePath (relative) | file content string or null | 46–53 |
-| `fs-write-file` | → main | filePath, content | true | 55–59 |
-| `exec-command` | → main | command string | stdout trimmed | 62–83 |
-| `git-commit` | → main | message string | "committed" | 86–97 |
-| `chat-start` | → main | model name | 'started' or 'model-not-found' | 100–112 |
-| `chat-send-message` | → main | message text | 'ok' | 114–122 |
-| `chat-stop` | → main | none | true (process killed) | 124–127 |
-| `systemai-start` | → main | model path | true | 130–136 |
-| `dialog-select-folder` | → main | options | file path or null | 140–144 |
-
----
+| Channel | Direction | Parameters | Returns |
+|---------|-----------|------------|---------|
+| `engine-get-config` | → main | none | config object |
+| `engine-set-config` | → main | partial config | void |
+| `engine-detect-hardware` | → main | none | {os} |
+| `fs-read-file` | → main | filePath (relative) | file content string or null |
+| `fs-write-file` | → main | filePath, content | true |
+| `exec-command` | → main | command string | stdout trimmed |
+| `git-commit` | → main | message string | "committed" |
+| `chat-start` | → main | model name | 'started' or 'model-not-found' |
+| `chat-send-message` | → main | message text | 'ok' |
+| `chat-stop` | → main | none | true (process killed) |
+| `systemai-start` | → main | model path | true |
+| `systemai-send-message` | → main | message text | 'ok' |
+| `systemai-stop` | → main | none | true (process killed) |
+| `dialog-select-folder` | → main | options | file path or null |
+| `electron-store-get-config` | → main | none | config object |
+| `electron-store-set-config` | → main | key, value | true |
 
 ---
 

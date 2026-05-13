@@ -16,6 +16,16 @@ contextBridge.exposeInMainWorld('api', {
   fs: {
     readFile: (filePath: string) => ipcRenderer.invoke('fs-read-file', filePath),
     writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs-write-file', filePath, content),
+    getProjectRoot: () => ipcRenderer.invoke('fs-get-project-root'),
+    setProjectRoot: (rootPath: string) => ipcRenderer.invoke('fs-set-project-root', rootPath),
+    readTree: () => ipcRenderer.invoke('fs-read-tree'),
+    startWatcher: () => ipcRenderer.invoke('fs-start-watcher'),
+    stopWatcher: () => ipcRenderer.invoke('fs-stop-watcher'),
+    onFileTreeChanged: (callback: Callback) => {
+      const handler = (_e: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('file-tree-changed', handler);
+      return () => ipcRenderer.removeListener('file-tree-changed', handler);
+    },
   },
 
   // Terminal
@@ -40,11 +50,12 @@ contextBridge.exposeInMainWorld('api', {
   systemAI: {
     start: (modelPath: string) => ipcRenderer.invoke('systemai-start', modelPath),
     sendMessage: (message: string) => ipcRenderer.invoke('systemai-send-message', message),
+    stop: () => ipcRenderer.invoke('systemai-stop'),
   },
 
   // Dialogs
   dialog: {
-    selectFolder: () => ipcRenderer.invoke('dialog-select-folder'),
+    selectFolder: (parentWindow?: any) => ipcRenderer.invoke('dialog-select-folder', parentWindow),
   },
 
   // Store config for Electron to read

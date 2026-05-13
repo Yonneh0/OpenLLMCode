@@ -1,6 +1,25 @@
 import React from 'react';
 
 export function EditorArea() {
+  const codeLines = [
+    '<span style="color:#cba6f7">import</span> React {"{ useState }"} <span style="color:#cba6f7">from</span> <span style="color:#a6e3a1">"react"</span>',
+    '',
+    '<span style="color:#cba6f7">export function</span> <span style="color:#89b4fa">App</span>() {',
+    '  <span style="color:#cba6f7">const</span>[count, setCount] = useState(<span style="color:#fab387">0</span>)',
+    '',
+    '  <span style="color:#a6adc8">// OpenLLMCode — Local AI Coding Agent</span>',
+    '  <span style="color:#cba6f7">return</span>(<br/>',
+    '    &lt;<span style="color:#f38ba8">div</span>&gt;',
+    '      &lt;<span style="color:#f38ba8">h1</span>&gt;Hello, OpenLLMCode!',
+    '        &lt;<span style="color:#f38ba8">button</span> onClick={() => <span style="color:#cba6f7">setCount</span>(c => c + <span style="color:#fab387">1</span>)&gt;',
+    '          Click me ({count} clicks)',
+    '        &lt;/<span style="color:#f38ba8">button</span>&gt;',
+    '      &lt;/<span style="color:#f38ba8">h1</span>&gt;',
+    '    &lt;/<span style="color:#f38ba8">div</span>&gt;',
+    '  );',
+    '}',
+  ].join('\n');
+
   return (
     <div className="flex-1 flex flex-col min-w-0">
       {/* Tab bar */}
@@ -11,22 +30,7 @@ export function EditorArea() {
 
       {/* Monaco Editor placeholder */}
       <div className="flex-1 bg-[#1e1e2e] p-4 overflow-auto font-mono text-sm leading-relaxed">
-        <pre className="text-[#cdd6f4] whitespace-pre-wrap">
-          {'<span style="color:#cba6f7">import</span> React {"{ useState }"} <span style="color:#cba6f7">from</span> <span style="color:#a6e3a1">"react"</span>;\n\n'}
-          {'<span style="color:#cba6f7">export function</span> <span style="color:#89b4fa">App</span>() {"{"}\n'}
-          {'  '}<span style="color:#cba6f7">const</span>[count, setCount] = useState(<span style="color:#fab387">0</span>);\n\n{'\n'}
-          {'  '}<span style="color:#a6adc8">// OpenLLMCode — Local AI Coding Agent</span>{'\n'}
-          {'  '}<span style="color:#cba6f7">return</span>(<br/>'}
-          {'    '}&lt;<span style="color:#f38ba8">div</span>&gt;\n{'\n'}
-          {'      '}&lt;<span style="color:#f38ba8">h1</span>&gt;Hello, OpenLLMCode!{'\n'}
-          {'        '}&lt;<span style="color:#f38ba8">button</span> onClick={() =&gt; <span style="color:#cba6f7">setCount</span>(c =&gt; c + <span style="color:#fab387">1</span>)}&gt;\n{'\n'}
-          {'          '}Click me ({count} clicks)\n{'\n'}
-          {'        '}&lt;/<span style="color:#f38ba8">button</span>&gt;{\'\n'}
-          {'      '}&lt;/<span style="color:#f38ba8">h1</span>&gt;\n{'\n'}
-          {'    '}&lt;/<span style="color:#f38ba8">div</span>&gt;\n{'\n'}
-          {'  '});\n{'\n'}
-          {'}'}
-        </pre>
+        <pre className="text-[#cdd6f4] whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: codeLines }} />
       </div>
 
       {/* Breadcrumbs */}

@@ -1,8 +1,6 @@
 import React, { useEffect } from 'react';
 
-declare global {
-  interface Window { api: any; }
-}
+// Note: Window.api type is declared in src/store/fileTreeStore.tsx — no duplicate declaration needed here.
 
 export function App() {
   useEffect(() => {

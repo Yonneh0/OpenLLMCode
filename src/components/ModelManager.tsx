@@ -71,7 +71,7 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
         {activeTab === 'local' && (
           <>
             {localModels.map((model) => (
-              <ModelCard key={model.name} model={model} isCurrent={model.name.includes(currentModel)} />
+              <ModelCard key={model.name} model={model} isCurrent={currentModel !== undefined && model.name.includes(currentModel)} onModelSelect={onModelSelect} />
             ))}
             {localModels.length === 0 && (
               <div className="text-sm text-[#a6adc8] opacity-70">No local models found. Download from HuggingFace tab.</div>
@@ -115,10 +115,11 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
   );
 }
 
-function ModelCard({ model, hf, isCurrent }: {
+function ModelCard({ model, hf, isCurrent, onModelSelect }: {
   model?: { name: string; path: string; sizeMB: number; loaded: boolean };
   hf?: boolean;
   isCurrent?: boolean;
+  onModelSelect?: (modelId: string) => void;
 }) {
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -151,7 +152,7 @@ function ModelCard({ model, hf, isCurrent }: {
         <span className="text-xs opacity-60">{model?.sizeMB} MB • GGUF</span>
         <div className="flex gap-1.5">
           {!isCurrent && (
-            <button onClick={() => onModelSelect(model!.name)} className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#f9e2af]/30' : 'bg-[#cba6f7] hover:bg-[#b4befe] text-black'}`}>
+            <button onClick={() => onModelSelect?.(model!.name)} className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#f9e2af]/30' : 'bg-[#cba6f7] hover:bg-[#b4befe] text-black'}`}>
               ▶ Load
             </button>
           )}

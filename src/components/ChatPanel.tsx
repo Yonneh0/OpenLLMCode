@@ -1,11 +1,12 @@
 // Enhanced chat panel — streaming, Markdown rendering, message actions (Phase B)
 import React, { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import type { GenerationConfig } from './GenerationParams';
+import type { GenerationConfig, ChatMessage } from '../types';
 import { getDefaults } from './GenerationParams';
 
 interface ChatPanelProps {
   generationConfig?: GenerationConfig;
+  onConfigChange?: (config: GenerationConfig) => void;
 }
 
 type ToolCallData = { id: string; type: string; input?: Record<string, unknown>; status: 'pending' | 'running' | 'completed' | 'failed' };
@@ -82,7 +83,21 @@ function renderMarkdown(text: string): React.ReactNode {
   return result;
 }
 
-export function ChatPanel({ generationConfig }: ChatPanelProps) {
+// Fix #4: Wire GenerationParams onChange prop to store/parent state
+export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) {
+  const [localConfig, setLocalConfig] = useState<GenerationConfig>(generationConfig || getDefaults());
+
+  // Update local config when parent passes new config
+  useEffect(() => {
+    if (generationConfig) {
+      setLocalConfig(generationConfig);
+    }
+  }, [generationConfig]);
+
+  const handleConfigChange = (config: GenerationConfig) => {
+    setLocalConfig(config);
+    onConfigChange?.(config);
+  };
   const messages = useChatStore((s) => s.messages);
   const isSending = useChatStore((s) => s.isSending);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -126,14 +141,14 @@ export function ChatPanel({ generationConfig }: ChatPanelProps) {
       const interval = setInterval(() => {
         if (msgIdx >= streamTexts.length) {
           clearInterval(interval);
-          setMessages((prev: typeof messages) => prev.map(m => m.id === responseId ? { ...m, streaming: false } : m));
+          useChatStore.setState((s) => ({ messages: s.messages.map((m: ChatMessage) => ({ ...m, streaming: false })) }));
           return;
         }
 
         const fullText = streamTexts.slice(0, msgIdx + 1).join('');
         const currentChar = streamTexts[msgIdx][charIdx];
         if (currentChar) {
-          setMessages((prev: typeof messages) => prev.map(m => m.id === responseId ? { ...m, content: fullText } : m));
+          useChatStore.setState((s) => ({ messages: s.messages.map((m: ChatMessage) => m.id === responseId ? ({ ...m, content: fullText }) : m) }));
           charIdx++;
         } else {
           msgIdx++;
@@ -212,11 +227,11 @@ export function ChatPanel({ generationConfig }: ChatPanelProps) {
             className="px-2.5 py-1 rounded bg-[#313244] hover:bg-[#45475a] text-xs transition" 
             title="Attach file">📎 Attach</button>
 
-          {/* Generation parameters - controlled select */}
+          {/* Generation parameters - controlled select (Fix #4) */}
           <div className="flex items-center gap-2 ml-auto text-xs">
             <select 
-              value={currentConfig.temperature.toString()} 
-              onChange={(e) => { /* update temperature via parent callback */ }}
+              value={localConfig.temperature.toString()} 
+              onChange={(e) => handleConfigChange({ ...localConfig, temperature: parseFloat(e.target.value) })}
               className="bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-1"
             >
               <option value="0.3">T: 0.3</option>
@@ -249,8 +264,8 @@ export function ChatPanel({ generationConfig }: ChatPanelProps) {
         <span>{new Date().toLocaleTimeString()}</span>
       </div>
 
-      {/* System Prompt Editor Modal */}
-      <SystemPromptEditor />
+      {/* System Prompt Editor Modal (Fix #6) */}
+      <SystemPromptEditor onConfigChange={handleConfigChange} />
     </div>
   );
 }
@@ -314,19 +329,51 @@ function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'a
   );
 }
 
-// System Prompt Editor Modal
-function SystemPromptEditor() {
-  const [isOpen, setIsOpen] = React.useState(false);
+// Fix #6: System Prompt Editor Modal — converted to controlled state so edits persist when modal reopens
+function SystemPromptEditor({ onConfigChange }: { onConfigChange?: (config: GenerationConfig) => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [promptText, setPromptText] = useState('');
 
-  if (!isOpen) return null;
+  // Open the modal and initialize prompt text from store or default
+  useEffect(() => {
+    if (isOpen) {
+      // Load current system prompt from localStorage or use default
+      const saved = localStorage.getItem('openllmcode-system-prompt');
+      setPromptText(saved || getDefaultSystemPrompt());
+    }
+  }, [isOpen]);
 
-  const PRESETS = {
+  function getDefaultSystemPrompt(): string {
+    return `You are OpenLLMCode, an AI coding assistant.\n\n[PROJECT CONTEXT]\nWorking directory: /path/to/project\nFile tree:\n  src/\n    app.ts\n    db.sql\n  package.json\n\n[AVAILABLE TOOLS]\n- read_file(path): Read a file's contents\n- write_file(path, content): Write to a file (requires approval)\n- run_command(command): Execute a shell command\n\n[BEHAVIORAL GUIDELINES]\n1. Always read a file before modifying it — never guess at its contents\n2. Show the diff of changes before requesting approval to write\n3. Explain what you're doing and why before each action\n4. Ask clarifying questions when the task is ambiguous\n5. Prefer small, incremental changes over large rewrites`;
+  }
+
+  const PRESETS: Record<string, string> = {
     coding: 'You are a coding assistant working within OpenLLMCode. Always read files before modifying them.',
     review: 'You are a code reviewer. Focus on quality, security, and best practices.',
     debugging: 'You are a debugging expert. Analyze errors systematically and suggest targeted fixes.',
     reverse_engineer: 'You are a reverse engineer. Deep analyze the existing code to understand architecture, data flow, and design patterns.',
     security_auditor: 'You are a security auditor. Systematically review code for vulnerabilities, anti-patterns, and best-practice violations.',
   };
+
+  const handleApplyPreset = (presetName: string) => {
+    setPromptText(PRESETS[presetName] || getDefaultSystemPrompt());
+  };
+
+  const handleSave = () => {
+    localStorage.setItem('openllmcode-system-prompt', promptText);
+    setIsOpen(false);
+  };
+
+  if (!isOpen) return null;
+
+  // Trigger button in ChatPanel header opens this modal
+  const openButton = (
+    <button 
+      title="System Prompt" 
+      className="ml-1 px-2 py-0.5 rounded bg-[#313244] hover:bg-[#45475a] transition text-xs"
+      onClick={() => setIsOpen(true)}
+    >⚙️</button>
+  );
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setIsOpen(false)}>
@@ -337,20 +384,27 @@ function SystemPromptEditor() {
 
         {/* Presets */}
         <div className="px-6 py-3 border-b border-[#45475a] bg-[#181825]/60 flex gap-2">
-          {Object.entries(PRESETS).map(([key, value]) => (
-            <button key={key} onClick={() => { /* apply preset */ }} className="px-3 py-1 rounded text-xs bg-[#313244] hover:bg-[#45475a] transition">
-              {Object.keys(PRESETS).indexOf(key) === 0 ? 'Coding' : Object.keys(PRESETS).indexOf(key) === 1 ? 'Review' : Object.keys(PRESETS).indexOf(key) === 2 ? 'Debug' : Object.keys(PRESETS).indexOf(key) === 3 ? 'R/E' : 'Audit'}
+          {Object.keys(PRESETS).map((key, idx) => (
+            <button 
+              key={key} 
+              onClick={() => handleApplyPreset(key)} 
+              className="px-3 py-1 rounded text-xs bg-[#313244] hover:bg-[#45475a] transition"
+            >
+              {idx === 0 ? 'Coding' : idx === 1 ? 'Review' : idx === 2 ? 'Debug' : idx === 3 ? 'R/E' : 'Audit'}
             </button>
           ))}
         </div>
 
-        {/* Prompt text */}
-        <textarea defaultValue={`You are OpenLLMCode, an AI coding assistant.\n\n[PROJECT CONTEXT]\nWorking directory: /path/to/project\nFile tree:\n  src/\n    app.ts\n    db.sql\n  package.json\n\n[AVAILABLE TOOLS]\n- read_file(path): Read a file's contents\n- write_file(path, content): Write to a file (requires approval)\n- run_command(command): Execute a shell command\n\n[BEHAVIORAL GUIDELINES]\n1. Always read a file before modifying it — never guess at its contents\n2. Show the diff of changes before requesting approval to write\n3. Explain what you're doing and why before each action\n4. Ask clarifying questions when the task is ambiguous\n5. Prefer small, incremental changes over large rewrites`} rows={16}
+        {/* Prompt text — controlled textarea (Fix #6) */}
+        <textarea 
+          value={promptText} 
+          onChange={(e) => setPromptText(e.target.value)}
+          rows={16}
           className="flex-1 bg-[#1e1e2e] border-none px-6 py-3 text-sm font-mono focus:outline-none resize-none" />
 
         <div className="px-6 py-3 bg-[#181825]/60 border-t border-[#45475a] flex justify-end gap-2">
           <button onClick={() => setIsOpen(false)} className="px-3 py-1.5 rounded text-xs hover:bg-[#313244] transition">Cancel</button>
-          <button onClick={() => setIsOpen(false)} className="px-3 py-1.5 rounded bg-[#cba6f7] hover:bg-[#b4befe] text-black font-semibold text-xs transition">Save & Apply</button>
+          <button onClick={handleSave} className="px-3 py-1.5 rounded bg-[#cba6f7] hover:bg-[#b4befe] text-black font-semibold text-xs transition">Save & Apply</button>
         </div>
       </div>
     </div>

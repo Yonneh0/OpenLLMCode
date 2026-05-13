@@ -53,31 +53,38 @@ DENIED ACTIONS:
   async sendMessage(message: string): Promise<string> {
     if (!this.process) await this.start();
 
+    // Guard: ensure process is initialized before accessing stdin/stdout
+    const proc = this.process;
+    if (!proc || !proc.stdin || !proc.stdout) {
+      return Promise.reject(new Error('System AI process not ready'));
+    }
+
     const fullMessage = JSON.stringify({
       type: 'message',
       system_prompt: this.getSystemPrompt(),
       message,
     });
 
+    // Non-null assertions safe because guard above verified proc.stdin/stdout exist
     return new Promise((resolve, reject) => {
       try {
         // Send via stdin to llama-server
-        this.process!.stdin.write(fullMessage + '\n');
+        proc.stdin!.write(fullMessage + '\n');
 
         // Collect response from stdout
         let response = '';
         const handler = (data: Buffer) => {
           response += data.toString();
           if (response.includes('done')) {
-            this.process!.stdout.removeListener('data', handler);
+            proc.stdout!.removeListener('data', handler);
             resolve(response.trim());
           }
         };
-        this.process!.stdout.on('data', handler);
+        proc.stdout!.on('data', handler);
 
         // Timeout fallback
         setTimeout(() => {
-          this.process!.stdout.removeListener('data', handler);
+          proc.stdout!.removeListener('data', handler);
           if (!response.includes('done')) {
             resolve(response || 'System AI response');
           }
