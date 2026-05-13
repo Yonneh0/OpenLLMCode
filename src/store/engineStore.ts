@@ -1,31 +1,21 @@
+// Engine configuration state (Phase A)
 import { create } from 'zustand';
-import type { Backend, EngineConfig, ModelInfo } from '../types';
+import type { Backend } from '../types';
 
 interface EngineState {
-  config: EngineConfig;
-  models: ModelInfo[];
-  loading: boolean;
-  setConfig: (config: Partial<EngineConfig>) => void;
-  selectBackend: (backend: Backend) => void;
-  loadModel: (modelId: string) => Promise<void>;
+  backend: Backend;
+  binarySource: 'prebuilt' | 'compile';
+  selectedModel: string;
+  systemAIModel: string;
+  hardwareDetected: boolean;
 }
 
 export const useEngineStore = create<EngineState>((set) => ({
-  config: { backend: 'cpu', binarySource: 'prebuilt', selectedModel: '', systemAIModel: '' },
-  models: [],
-  loading: false,
+  backend: 'cpu',
+  binarySource: 'prebuilt',
+  selectedModel: 'ibm-grok4-1b.Q8_0',
+  systemAIModel: 'ibm-grok4-1b.Q8_0',
+  hardwareDetected: false,
 
-  setConfig: (config) => set((state) => ({ config: { ...state.config, ...config } })),
-
-   selectBackend: (backend) => set((state) => ({ config: { ...state.config, backend } })),
-
-   loadModel: async (modelId) => {
-     set({ loading: true });
-     try { await window.api.chat.start({ model: modelId }); } catch {}
-     set((state) => ({
-       models: state.models.map(m => m.id === modelId ? { ...m, loaded: true } : m),
-       config: { ...state.config, selectedModel: modelId },
-       loading: false,
-     }));
-   },
+  setBackend: (backend: Backend) => set({ backend }),
 }));

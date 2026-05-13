@@ -1,5 +1,9 @@
 import React, { useEffect } from 'react';
 
+declare global {
+  interface Window { api: any; }
+}
+
 export function App() {
   useEffect(() => {
     const initEngine = async () => {
@@ -73,14 +77,7 @@ export function App() {
           </div>
 
           {/* Monaco Editor placeholder */}
-          <div className="flex-1 bg-[#1e1e2e] p-4 overflow-auto font-mono text-sm leading-relaxed">
-            <pre className="text-[#cdd6f4] whitespace-pre-wrap">
-              {'<span style="color:#cba6f7">import</span> React {"{ useState }"} <span style="color:#cba6f7">from</span> <span style="color:#a6e3a1">"react"</span>;\n\n'}
-              {'<span style="color:#cba6f7">export function</span> <span style="color:#89b4fa">App</span>() {"{"}\n'}
-              {'  '}<span style="color:#cba6f7">const</span>[count, setCount] = useState(<span style="color:#fab387">0</span>);\n\n{'\n'}
-              {'  '}<span style="color:#a6adc8">// OpenLLMCode — Local AI Coding Agent</span>{'\n'}
-            </pre>
-          </div>
+          <MonacoEditor />
 
           {/* Breadcrumbs + status */}
           <div className="px-4 py-1 bg-[#313244] border-t border-[#45475a] text-xs text-[#a6adc8] flex items-center justify-between">
@@ -101,75 +98,111 @@ export function App() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            <div className="mb-2 mr-auto max-w-[90%] rounded-lg p-3 text-sm bg-indigo-600/20 border border-indigo-500/30">
-              <span className="text-[#a6adc8] text-xs block mb-1">🧑 You</span>
-              Fix the authentication bug in src/auth/middleware.ts
-            </div>
-
-            <div className="mb-2 ml-auto max-w-[90%] rounded-lg p-3 text-sm bg-[#1e1e2e]/50 border border-[#45475a]">
-              <span className="text-[#a6adc8] text-xs block mb-1">🤖 Agent</span>
-              I'll investigate the auth middleware. Let me read the file first to understand the current implementation.<br/>
-
-              <div className="mt-2 rounded bg-[#181825]/60 border border-[#45475a] p-2 text-xs flex items-center gap-2">
-                🔧 read_file — <span className="text-[#a6e3a1]">completed</span>
-              </div>
-
-              I found the issue. The JWT verification is using an expired secret key.<br/>
-
-              <div className="mt-2 rounded bg-[#181825]/60 border border-[#45475a] p-2 text-xs flex items-center gap-2">
-                🔧 run_command — <span className="text-[#f9e2af]">running</span>
-              </div>
-            </div>
-
-            {/* Timestamp */}
-            <div className="mt-1 text-xs text-[#a6adc8] opacity-50">
-              {new Date(Date.now()).toLocaleTimeString()}
-            </div>
-          </div>
+          <ChatMessages />
 
           {/* Input area */}
-          <div className="p-3 border-t border-[#45475a] bg-[#181825]/40">
-            <textarea placeholder="💬 Type a message..." rows={3}
-              className="w-full resize-none rounded bg-[#1e1e2e] border border-[#45475a] px-3 py-2 text-sm focus:outline-none focus:border-[#cba6f7]" />
-
-            <div className="flex items-center gap-2 mt-2">
-              <button className="px-2.5 py-1 rounded bg-[#313244] hover:bg-[#45475a] text-xs transition" title="Attach file">📎 Attach</button>
-
-              {/* Generation parameters */}
-              <select defaultValue={0.7} className="ml-auto bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-1 text-xs">
-                <option value="0.7" defaultValue>T: 0.7</option>
-                <option value="0.9">T: 0.9</option>
-              </select>
-
-              {/* Send button */}
-              <button className="px-4 py-1 rounded bg-[#cba6f7] hover:bg-[#b4befe] text-black font-semibold text-xs transition">▶ Send</button>
-            </div>
-          </div>
+          <InputArea />
         </aside>
       </main>
 
       {/* Terminal panel */}
-      <div className="h-48 flex-shrink-0 bg-[#1e1e2e] border-t border-[#45475a] flex flex-col">
-        <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[#45475a] bg-[#181825]/60">
-          <button className="px-3 py-1 rounded bg-[#313244] text-xs font-semibold hover:bg-[#45475a]/60 transition">Terminal</button>
-          <button className="px-3 py-1 rounded text-xs hover:bg-[#313244]/60 transition opacity-70 hover:opacity-100">Output</button>
-          <button className="ml-auto px-2 py-0.5 rounded bg-[#1e1e2e] border border-[#45475a] text-xs opacity-70 hover:opacity-100 transition">⚙️</button>
-        </div>
+      <TerminalPanel />
+    </div>
+  );
+}
 
-        <div className="flex-1 p-3 font-mono text-sm overflow-auto bg-[#181825]/40">
-          <pre className="text-[#a6adc8] leading-relaxed">
-            {'$ npm run dev\n'}
-            <span className="text-[#cba6f7]">&gt; openllmcode@0.1.0 dev</span>{'\n'}
-            {'>'} vite\n{'\n'}
-            <span className="text-[#a6e3a1]">  VITE v5.x ready in ~280ms</span>{'\n'}
-            <span className="text-[#a6adc8] opacity-70">  ➜ Local:   http://localhost:5173/\n</span>
-            {'$ '}<span className="animate-pulse bg-[#cba6f7]/40 w-2 h-4 inline-block align-middle" />
-          </pre>
-        </div>
+function MonacoEditor() {
+  const codeLines = [
+    '<span style="color:#cba6f7">import</span> React {"{ useState }"} <span style="color:#cba6f7">from</span> <span style="color:#a6e3a1">"react"</span>',
+    '',
+    '<span style="color:#cba6f7">export function</span> <span style="color:#89b4fa">App</span>() {',
+    '  <span style="color:#cba6f7">const</span>[count, setCount] = useState(<span style="color:#fab387">0</span>)',
+    '',
+    '  <span style="color:#a6adc8">// OpenLLMCode — Local AI Coding Agent</span>',
+    '}',
+  ].join('\n');
 
-        <div className="h-1.5 cursor-row-resize hover:bg-[#cba6f7]/30 transition-colors" />
+  return (
+    <div className="flex-1 bg-[#1e1e2e] p-4 overflow-auto font-mono text-sm leading-relaxed">
+      <pre className="text-[#cdd6f4] whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: codeLines }} />
+    </div>
+  );
+}
+
+function ChatMessages() {
+  return (
+    <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="mb-2 mr-auto max-w-[90%] rounded-lg p-3 text-sm bg-indigo-600/20 border border-indigo-500/30">
+        <span className="text-[#a6adc8] text-xs block mb-1">🧑 You</span>
+        Fix the authentication bug in src/auth/middleware.ts
       </div>
+
+      <div className="mb-2 ml-auto max-w-[90%] rounded-lg p-3 text-sm bg-[#1e1e2e]/50 border border-[#45475a]">
+        <span className="text-[#a6adc8] text-xs block mb-1">🤖 Agent</span>
+        I'll investigate the auth middleware. Let me read the file first to understand the current implementation.<br/>
+
+        <div className="mt-2 rounded bg-[#181825]/60 border border-[#45475a] p-2 text-xs flex items-center gap-2">
+          🔧 read_file — <span className="text-[#a6e3a1]">completed</span>
+        </div>
+
+        I found the issue. The JWT verification is using an expired secret key.<br/>
+
+        <div className="mt-2 rounded bg-[#181825]/60 border border-[#45475a] p-2 text-xs flex items-center gap-2">
+          🔧 run_command — <span className="text-[#f9e2af]">running</span>
+        </div>
+      </div>
+
+      {/* Timestamp */}
+      <div className="mt-1 text-xs text-[#a6adc8] opacity-50">
+        {new Date(Date.now()).toLocaleTimeString()}
+      </div>
+    </div>
+  );
+}
+
+function InputArea() {
+  return (
+    <div className="p-3 border-t border-[#45475a] bg-[#181825]/40">
+      <textarea placeholder="💬 Type a message..." rows={3}
+        className="w-full resize-none rounded bg-[#1e1e2e] border border-[#45475a] px-3 py-2 text-sm focus:outline-none focus:border-[#cba6f7]" />
+
+      <div className="flex items-center gap-2 mt-2">
+        <button className="px-2.5 py-1 rounded bg-[#313244] hover:bg-[#45475a] text-xs transition" title="Attach file">📎 Attach</button>
+
+        {/* Generation parameters */}
+        <select defaultValue="0.7" className="ml-auto bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-1 text-xs">
+          <option value="0.7">T: 0.7</option>
+          <option value="0.9">T: 0.9</option>
+        </select>
+
+        {/* Send button */}
+        <button className="px-4 py-1 rounded bg-[#cba6f7] hover:bg-[#b4befe] text-black font-semibold text-xs transition">▶ Send</button>
+      </div>
+    </div>
+  );
+}
+
+function TerminalPanel() {
+  return (
+    <div className="h-48 flex-shrink-0 bg-[#1e1e2e] border-t border-[#45475a] flex flex-col">
+      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[#45475a] bg-[#181825]/60">
+        <button className="px-3 py-1 rounded bg-[#313244] text-xs font-semibold hover:bg-[#45475a]/60 transition">Terminal</button>
+        <button className="px-3 py-1 rounded text-xs hover:bg-[#313244]/60 transition opacity-70 hover:opacity-100">Output</button>
+        <button className="ml-auto px-2 py-0.5 rounded bg-[#1e1e2e] border border-[#45475a] text-xs opacity-70 hover:opacity-100 transition">⚙️</button>
+      </div>
+
+      <div className="flex-1 p-3 font-mono text-sm overflow-auto bg-[#181825]/40">
+        <pre className="text-[#a6adc8] leading-relaxed">
+          {'$ npm run dev\n'}
+          <span className="text-[#cba6f7]">&gt; openllmcode@0.1.0 dev</span>{'\n'}
+          {'>'} vite\n{'\n'}
+          <span className="text-[#a6e3a1]">  VITE v5.x ready in ~280ms</span>{'\n'}
+          <span className="text-[#a6adc8] opacity-70">  ➜ Local:   http://localhost:5173/\n</span>
+          {'$ '}<span className="animate-pulse bg-[#cba6f7]/40 w-2 h-4 inline-block align-middle" />
+        </pre>
+      </div>
+
+      <div className="h-1.5 cursor-row-resize hover:bg-[#cba6f7]/30 transition-colors" />
     </div>
   );
 }

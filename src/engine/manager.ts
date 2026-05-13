@@ -44,7 +44,7 @@ export async function detectHardware(): Promise<{
 }
 
 // ─── Backend selection ──────────────────────
-export function getRecommendedBackend(hardware: ReturnType<typeof detectHardware>): Backend {
+export function getRecommendedBackend(hardware: Awaited<ReturnType<typeof detectHardware>>): Backend {
   if (hardware.platform === 'darwin') return 'metal';
   if (hardware.gpu?.toLowerCase().includes('nvidia')) return 'cuda';
   if (hardware.gpu) return 'vulkan'; // fallback

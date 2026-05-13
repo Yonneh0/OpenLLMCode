@@ -8,6 +8,8 @@ interface ChatPanelProps {
   generationConfig?: GenerationConfig;
 }
 
+type ToolCallData = { id: string; type: string; input?: Record<string, unknown>; status: 'pending' | 'running' | 'completed' | 'failed' };
+
 // Simple Markdown-to-HTML renderer for agent messages (no external dependency)
 function renderMarkdown(text: string): React.ReactNode {
   const lines = text.split('\n');
@@ -124,14 +126,14 @@ export function ChatPanel({ generationConfig }: ChatPanelProps) {
       const interval = setInterval(() => {
         if (msgIdx >= streamTexts.length) {
           clearInterval(interval);
-          setMessages((prev) => prev.map(m => m.id === responseId ? { ...m, streaming: false } : m));
+          setMessages((prev: typeof messages) => prev.map(m => m.id === responseId ? { ...m, streaming: false } : m));
           return;
         }
 
         const fullText = streamTexts.slice(0, msgIdx + 1).join('');
         const currentChar = streamTexts[msgIdx][charIdx];
         if (currentChar) {
-          setMessages((prev) => prev.map(m => m.id === responseId ? { ...m, content: fullText } : m));
+          setMessages((prev: typeof messages) => prev.map(m => m.id === responseId ? { ...m, content: fullText } : m));
           charIdx++;
         } else {
           msgIdx++;
@@ -253,7 +255,7 @@ export function ChatPanel({ generationConfig }: ChatPanelProps) {
   );
 }
 
-function ChatMessageItem({ message }: { message: typeof useChatStore.getState().messages[0] }) {
+function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'assistant'; content: string; timestamp: number; streaming?: boolean; toolCalls?: Array<{ id: string; type: string; status: string }> } & { generationConfig?: { temperature: number; topP: number } }}) {
   return (
     <div className={`mb-2 ${message.role === 'user' ? 'ml-auto max-w-[80%]' : 'mr-auto max-w-[90%]'} rounded-lg p-3 text-sm`}>
       {message.role === 'user' ? (

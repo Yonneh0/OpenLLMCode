@@ -1,4 +1,12 @@
 // ─── Core Types ────────────────────────────────────────────────
+export interface GenerationConfig {
+  temperature: number;
+  topP: number;
+  repetitionPenalty: number;
+  maxTokens: number;
+  stopSequences: string[];
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -6,12 +14,13 @@ export interface ChatMessage {
   timestamp: number;
   toolCalls?: ToolCall[];
   streaming?: boolean;
+  generationConfig?: GenerationConfig;
 }
 
 export interface ToolCall {
   id: string;
   type: 'read_file' | 'write_file' | 'run_command' | 'create_file' | 'delete_file';
-  input: Record<string, unknown>;
+  input?: Record<string, unknown>;
   status: 'pending' | 'running' | 'completed' | 'failed';
   result?: string;
 }
