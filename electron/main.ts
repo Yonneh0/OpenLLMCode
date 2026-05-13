@@ -1,9 +1,10 @@
 // ─── State ──────────────────────────────────────────────────────
-const electron = require('electron');
-let { app, BrowserWindow, ipcMain, dialog } = electron;
 const fs = require('fs');
 const pathModule = require('path');
 const { spawn } = require('child_process');
+
+let electron: any;
+const getElectron = () => (electron || (electron = require('electron')));
 
 let mainWindow: any = null;
 let llamaCppProcess: any = null;
@@ -43,8 +44,12 @@ function saveConfig(cfg: Record<string, unknown>) {
   fs.writeFileSync(c.CONFIG_FILE, JSON.stringify(cfg, null, 2));
 }
 
-// ─── IPC Registration ──────────────────────────────────────────
+// ─── IPC Registration (called inside app.whenReady) ──────────────
 function registerIpc() {
+  const electron = getElectron();
+  const ipcMain = electron.ipcMain;
+  const dialog = electron.dialog;
+
   ipcMain.handle('engine-get-config', () => loadConfig());
   ipcMain.handle('engine-set-config', (_e: any, cfg: Record<string, unknown>) => saveConfig({ ...loadConfig(), ...cfg }));
   ipcMain.handle('engine-detect-hardware', () => ({ os: process.platform }));
@@ -155,6 +160,8 @@ function registerIpc() {
 
 // ─── App Lifecycle ──────────────────────────────────────────────
 function createMainWindow() {
+  const electron = getElectron();
+  const BrowserWindow = electron.BrowserWindow;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -186,14 +193,22 @@ function startApp() {
 }
 
 // ─── App Lifecycle (top-level) ──────────────────────────────────────
-app.whenReady().then(() => {
-  // Re-import electron components to ensure they are available.
-  const e = require('electron');
-  ({ app, BrowserWindow, ipcMain, dialog } = e);
-  startApp();
-});
+function _start() {
+  const electron = getElectron();
+  if (!electron || typeof electron.app === 'undefined') return; // not in Electron runtime
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+  electron.app.whenReady().then(() => startApp());
+  electron.app.on('window-all-closed', () => { if (process.platform !== 'darwin') electron.app.quit(); });
+}
+
+// Guard against plain-node execution where require('electron') returns a string path
+const _electron = getElectron();
+if (typeof _electron === 'string' || typeof _electron.app === 'undefined') {
+  console.log('[main] Electron runtime detected, starting...');
+  _start();
+} else {
+  _start();
+}
 
 exports.loadConfig = loadConfig;
 exports.saveConfig = saveConfig;
