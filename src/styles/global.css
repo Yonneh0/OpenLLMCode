@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Global reset + dark theme defaults ───────── */
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: #1e1e2e !important;
+  color: #cdd6f4;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* ─── Scrollbar (dark) ────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #181825; }
+::-webkit-scrollbar-thumb { background: #45475a; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #585b70; }
+
+/* ─── Selection color ────────────── */
+::selection { background-color: rgba(203,166,247,0.3); }
+
+/* ─── Input defaults (dark) ────────────── */
+input[type="text"], input[type="number"], textarea, select {
+  background-color: #1e1e2e;
+  border-color: #45475a;
+  color: #cdd6f4;
+}
+
+/* ─── Focus ring ────────────── */
+input:focus, textarea:focus, button:focus, select:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(203,166,247,0.4);
+}
+
+/* ─── Transition utility ────────────── */
+.transition { transition-property: background-color, border-color, color, opacity; }
+
+/* ─── Text truncation ────────────── */
+.text-truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ─── Custom animations ────────────── */
+@keyframes pulse-slow { 0%,100% { opacity: .4; } 50% { opacity: .8; } }
+.animate-pulse-slow { animation: pulse-slow 2s ease-in-out infinite; }
+
+/* ─── Chat message bubble ────────────── */
+.msg-user { background-color: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.35); }
+.msg-assistant { background-color: rgba(30,30,46,0.6); border-color: rgba(69,71,90,0.6); }
+
+/* ─── Button hover states ────────────── */
+.btn-primary { transition: background-color 0.2s; }
+.btn-primary:hover { background-color: #b4befe !important; }
+
+/* ─── Custom scrollbar for chat messages ────────────── */
+.chat-scroll::-webkit-scrollbar { width: 6px; }
+.chat-scroll::-webkit-scrollbar-thumb { border-radius: 3px; }
