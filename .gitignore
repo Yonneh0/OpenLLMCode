@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build output
+dist/
+build/
+out/
+
+# Electron app
+*.log
+*.pid
+*.sock
+*.lock
+
+# Engine & model directories (where llama.cpp binaries and models are stored)
+engines/
+models/
+sources/
+
+# HuggingFace downloads cache
+.hf_cache/
+
+# System AI workspace
+system-ai/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / Editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.swp
+*.swo
+*~
+.idea/
+*.sublime-*
+.project
+.settings/
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+
+# Environment / Secrets (if any)
+.env
+.env.local
+.env.production
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS backup files
+*.bak
+*.old
+*.orig
+
+# Compiled assets (if using build system)
+assets/.compiled/
