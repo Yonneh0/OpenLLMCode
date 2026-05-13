@@ -88,12 +88,20 @@ OpenLLMCode is a desktop application for developers who want an **entirely local
 │  │  llama.cpp   │    │  System AI   │◄──► CPU-only, handles  │
 │  │  (assistant) │◄──►│  (1B model)  │     project mgmt,      │
 │  └──────────────┘    └──────────────┘     settings, compile   │
+│                                                               │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │                   Pingu (System AI Avatar)               │  │
+│  │  • Static claymation image in corner of UI              │  │
+│  │  • Lifelike animations: mouth movement, blinking        │  │
+│  │  • Eyes follow cursor when active; light up during work │  │
+│  │  • Click to open Pingu menu (skills, settings, etc.)    │  │
+│  └─────────────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 ### Process Model
 - **Main Process (Electron):** Manages the llama.cpp subprocesses, MCP server processes, file system access, terminal sessions, HuggingFace downloads, and Git operations
-- **Renderer Process:** React UI with IPC calls to main process for all agent operations
+- **Renderer Process:** React UI with IPC calls to main process for all agent operations; includes Pingu avatar rendering
 - **Primary llama.cpp Subprocess:** Launched as a child process; communicates via stdin/stdout or shared memory for inference. Binary selected by Engine Manager based on user's backend preference (or compiled from source by the System AI)
 - **Assistant llama.cpp Subprocess:** Runs CPU-only with the 1B system model; handles project management, settings, and compile tasks
 - **MCP Server Processes:** Each MCP server runs as an independent subprocess connected via stdio transport
@@ -772,6 +780,44 @@ Skills appear in a **tree-view panel** alongside MCP servers, auto-suggested whe
 | **Git Skills** | Blame analysis, bisect for bug finding, cherry-pick preview | When working with Git repositories |
 | **File Operations** | Diff viewer, rename refactoring, import finder | When editing source files |
 | **Security Scanners** | OWASP top 10 checks, dependency vulnerability scan, secret detection (git-secrets) | Before committing changes |
+| **Web Scraping** | URL scraping with headless browser, HTML parsing, content extraction | Any time web data is needed |
+| **Search & Query** | Google/Bing/DuckDuckGo search via APIs, Wikipedia lookup, Arxiv paper search | When research or real-time info is needed |
+| **Weather** | OpenWeatherMap/WTGNOAPI weather queries for current conditions and forecasts | When time/date/weather context needed |
+| **Maps & Location** | Google Maps/OpenStreetMap/Nominatim geocoding, directions, POI search | When location data needed |
+| **Time & Date** | World clock, timezone conversion, calendar integration (Google/Outlook APIs) | When scheduling or time queries arise |
+| **Finance** | CoinGecko crypto prices, Yahoo Finance stock quotes, currency conversion | Financial data lookups |
+| **Social Media** | Twitter/X API search, Reddit scraping, Hacker News queries, GitHub trending | Social/news monitoring |
+| **Developer Tools** | npm/yarn/pip package lookup, Stack Overflow Q&A search, documentation lookup (MDN, Read the Docs) | When looking up APIs or packages |
+| **Email & Notifications** | Gmail/Outlook API integration for sending/receiving emails with agent context | Communication tasks |
+
+### Pingu — System AI Avatar (New!)
+The System AI is anthropomorphized as a **copyleft version of Pingu** from [Pingu](https://en.wikipedia.org/wiki/Pingu) — the claymation penguin character known for expressive mouth movements, blinking, and iconic "Noot noot!" personality.
+
+```
+┌───────────────────────────────────────────────┐
+│  🐧 Pingu (System AI)                          │
+│                                               │
+│  ── Active State                              │
+│  • Eyes follow cursor during processing        │
+│  • "Lights up" — pupils dilate, body glows    │
+│  • Mouth animates while speaking               │
+│  • Blinking cycle (natural random timing)      │
+│                                               │
+│  ── Pingu Menu (click to open)                │
+│  ├── Skills                                    │
+│  ├── Settings                                  │
+│  ├── Compile Engine                            │
+│  ├── Manage Models                             │
+│  └── About Pingu                              │
+│                                               │
+└───────────────────────────────────────────────┘
+```
+
+**Behavior:**
+- **Idle state:** Pingu sits quietly with gentle breathing animation and periodic blinking
+- **Active state:** Eyes track cursor movement; body "lights up" (soft glow effect) during processing; mouth animates in sync with text output
+- **On click:** Opens a menu panel showing skills, settings, compile status, model info — all navigable via mouse or Tab/Arrow keys
+- **Personality quirk:** Occasionally emits a subtle "Noot noot!" sound when tasks complete (configurable)
 
 ### Skill Discovery & Auto-Suggestion
 - Skills are discovered on startup by scanning `.openllmcode-skills/` in the project root and `~/.openllmcode/skills/` globally
@@ -810,7 +856,50 @@ suggested_when: ["*.cpp present in project"]
 
 ---
 
-## 10C. Logging & Monitoring Tabs — Planned for Phase E
+## 10C. Pingu — System AI Avatar (Detailed Design)
+
+### Overview
+The System AI is personified as **Pingu**, inspired by [the BBC's copyleft claymation penguin](https://en.wikipedia.org/wiki/Pingu). This provides the UI with a warm, approachable mascot that communicates in a mix of human language and "Noot noot!" — giving users an emotional connection to their AI assistant.
+
+### Visual Design
+- **Static image:** Pingu PNG/SVG sits fixed in the lower-right corner of the app (or top-right when in compact mode)
+- **Claymation-style:** Rendered with a slightly rough, hand-sculpted appearance — soft edges, subtle imperfections that feel alive
+- **Color palette:** Matches the catppuccin dark theme (warm brown body, white belly, black eyes)
+
+### Animations & Behaviors
+| State | Animation | Trigger |
+|-------|-----------|---------|
+| **Idle** | Gentle breathing (subtle vertical bob); periodic blinking (random 2–5 sec interval) | No active tasks |
+| **Thinking** | Eyes widen; pupils dilate slightly; body glows softly | Agent is processing input, generating response |
+| **Speaking** | Mouth opens/closes in sync with text output; subtle head nod | Streaming tokens to chat panel |
+| **Happy** | Small jump/spin animation; "Noot noot!" sound effect | Task completed successfully |
+| **Error** | Head tilt (left or right); worried expression | Agent encounters error during task |
+| **Working on something** | Eyes follow cursor precisely; body bobs faster | User hovering over Pingu's menu area |
+
+### Pingu Menu (click to open)
+When clicked, Pingu opens a menu panel with the following options:
+- **Skills:** Toggle individual Agent Skills on/off
+- **Settings:** Quick access to engine settings, model config, HF auth
+- **Compile Engine:** View/trigger llama.cpp compilation status
+- **Manage Models:** Load/unload models from local storage
+- **Activity Log:** Open the plaintext activity log in a new tab
+- **About Pingu:** Fun facts and credits for the System AI avatar
+
+### Technical Implementation
+- Uses CSS animations + SVG transforms for mouth, eyes, body glow (no video overhead)
+- `requestAnimationFrame` loop tracks cursor position to update eye direction
+- Audio sprite for "Noot noot!" sound effect (configurable volume/silence toggle)
+- State managed via Zustand store (`pinguStore.ts`) — tracks active/inactive, mood state
+
+### Personality Traits
+- **Helpful but not pushy:** Pingu waits patiently; doesn't interrupt the user while they're working
+- **Curious:** Occasionally suggests relevant skills when hovering over certain file types
+- **Proud of work:** Celebrates completed tasks with a little dance
+- **Cautious:** When uncertain, tilts its head and asks clarifying questions
+
+---
+
+## 10D. Logging & Monitoring Tabs — Planned for Phase E
 
 ### Overview
 Dedicated logging tabs provide real-time visibility into llama.cpp instances during reasoning blocks, ensuring the UI remains responsive even when heavy inference is occurring. Users can monitor token generation, engine health, and detailed status at a glance.

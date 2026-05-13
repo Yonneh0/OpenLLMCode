@@ -1,12 +1,12 @@
 {
   "name": "openllmcode",
   "version": "0.1.0",
-  "description": "An open-source local AI coding agent with llama.cpp inference engine",
+  "description": "An open-source local AI coding agent that bundles its own llama.cpp inference engine",
   "main": "dist/electron/main.js",
   "scripts": {
     "dev": "vite --mode development",
     "build": "vite build",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_OPTIONS='--loader ts-node/esm' electron .\"",
     "electron:build": "npm run build && electron-builder",
     "typecheck": "tsc --noEmit"
   },
