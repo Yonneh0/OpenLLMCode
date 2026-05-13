@@ -2,6 +2,8 @@
 
 > An open-source, self-contained local AI coding agent that bundles its own llama.cpp inference engine, provides rich agentic tooling with human-in-the-loop approvals, and delivers a clean VS Code–inspired UI. All code is hosted at [github.com/Yonneh0/OpenLLMCode](https://github.com/Yonneh0/OpenLLMCode).
 
+> ✅ **Phase A — Foundation verified complete** (2026-05-13): 30 files, ~1882 lines committed. See README.md for the full Phase A verification table.
+
 ---
 
 ## 1. Vision & Scope
