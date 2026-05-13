@@ -184,6 +184,77 @@ Stdin/stdout JSON protocol via llama-server:
 
 ---
 
+## 4B. System AI — Development Environment Setup Scripts
+
+### Overview
+The System AI maintains a library of pre-built installation scripts for setting up complete development environments on-demand. These scripts cover the most common languages and toolchains, handling OS-specific details (package manager selection, architecture detection, verification) automatically. The AI runs them when:
+- A user requests setup of a specific language/toolchain
+- The agent detects that a project requires a missing tool (e.g., `cargo` for Rust, `dotnet` for .NET, `go` for Go) and triggers auto-install
+- Skills are activated that need their dependencies present (e.g., "C/C++ Code Audit" checks if `clang-tidy`, `valgrind`, or `gcc` exist; installs them if missing)
+
+### Pre-Built Environment Scripts (per-language/toolchain)
+
+| Language/Tool | Script Actions | Auto-Installed Tools |
+|---------------|----------------|---------------------|
+| **Node.js / npm** | Download from nodejs.org (or use nvm/nodenv), set as default, install common globals (typescript, eslint, prettier, webpack) | `node`, `npm`, `npx`, `tsc` |
+| **Python** | Install via pyenv (or system package manager), create venv, verify pip/virtualenv | `python3`, `pip`, `venv`, `mypy`, `pylint`, `black`, `pytest` |
+| **Go** | Download from golang.org/dl, set $GOROOT and $GOPATH, install common modules (gopls, staticcheck) | `go`, `gofmt`, `gotest`, `gopls` |
+| **Rust / Cargo** | Install via rustup.sh, configure toolchain for target arch, verify cargo/rustc | `cargo`, `rustc`, `rustfmt`, `cargo-clippy`, `rust-analyzer` |
+| **.NET SDK** | Install .NET SDK (dotnet-install script), verify dotnet runtime available | `dotnet`, `ilspy`/`monodis`, `vswhere` (Windows) |
+| **Java / Maven / Gradle** | Install JDK via sdkman or system package manager, configure JAVA_HOME | `java`, `javac`, `mvn`, `gradle` |
+| **C/C++ toolchain** | Detect and install: GCC/Clang/MSVC (Windows), build-essential, cmake, pkg-config | `gcc`, `g++`, `clang`, `cmake`, `make` |
+| **Deno / Bun** | Install via their official installers (`curl -fsSL https://deno.land/install.sh`) | `deno`, `bun` |
+
+### Additional Tooling Scripts (installed on-demand)
+
+| Category | Tools Installed By Script | Used When |
+|----------|-------------------------|-----------|
+| **Reverse Engineering** | `objdump`, `llvm-objdump`, `readelf`, `hexdump`, `strings`, `file` | Inspecting binaries (.so/.dll/.exe, Mach-O) |
+| **.NET Inspector** | `ilspy`, `monodis`, `ildasm`, `dnSpy` (via nuget/scoop/apt) | Opening .NET assemblies for decompilation |
+| **Network Tools** | `nmap`, `wireshark`/`tshark`, `tcpdump`, `curl`, `wget` | Running penetration tests, network scanning |
+| **Debugging** | `gdb`, `lldb`, `valgrind`, `strace`, `ltrace` | Debugging C/C++ binaries, tracing syscalls |
+| **Version Control** | `git`, `svn`, `hg` (Mercurial) | When working with non-git VCS repos |
+| **Compression** | `tar`, `gzip`, `unzip`, `7z`, `rar` | Extracting templates and archives |
+
+### Script Execution Flow
+```
+1. Agent receives request: "Install Go" or detects missing 'go' in PATH
+2. System AI runs appropriate install script (e.g., systemAI.ts:installGoScript())
+3. Script checks for existing installation — skips if present, upgrades if needed
+4. On completion, updates $PATH and writes new PATH to ~/.openllmcode/config.json
+5. Agent re-detects available tools and activates corresponding skills
+6. Chat notification confirms: "✅ Go installed successfully (v1.23). Available tools: go, gofmt, gotest"
+```
+
+### Auto-Detection During Task Execution
+When the agent encounters a missing tool during task execution, it attempts to install automatically:
+- **Python code audit on .py file** → checks for `mypy`, installs via pyenv if missing
+- **.NET assembly inspection on .dll** → detects missing `ilspy`, runs install script
+- **C++ code audit on .cpp file** → checks for `clang-tidy`/`valgrind`, installs from system package manager
+
+### Script Storage & Versioning
+- Scripts stored in `~/.openllmcode/scripts/env-setup/` organized by OS and language
+- Each script is a shell-compatible `.sh` file (with Windows PowerShell equivalents)
+- Script versions tracked: running `--version` on installed tools compares against known-good versions
+- Retry with fallbacks: if one install method fails (e.g., apt), try next (dnf, yum, brew, etc.)
+
+### Example — Auto-Suggested Environment Setup in UI
+```
+┌───────────────────────────────────────────────┐
+│  ⚡ Suggested Setup                            │
+│                                               │
+│  Detected Go project (go.mod found)           │
+│  Missing tools: go, gopls                     │
+│                                               │
+│  [🔧 Install Go Toolchain]                    │
+│    ▸ Installs go v1.23+ via sdkman/brew/apt   │
+│    ▸ Configures $GOROOT and $GOPATH            │
+│    ▸ Activates C++/Go Code Audit skill          │
+└───────────────────────────────────────────────┘
+```
+
+---
+
 ## 5. Model Manager — HuggingFace Downloader & Local Models
 
 ### Overview (Updated for Modern HF Requirements)
@@ -643,44 +714,99 @@ Clone projects from any Git provider with progress tracking and authentication o
 
 ---
 
-## 10B. Lightweight Assistant Model (UI Agent) — CPU Only (Verified Backend)
+## 10B. Agent Skills — Tree-View, Auto-Suggested Tool Extensions (Planned for Phase C/D)
 
 ### Overview
-A lightweight ~1B parameter model runs alongside the primary coding model, handling UI actions, project management, settings configuration, and routine tasks with strict system prompts. **This model always runs on CPU only** — no VRAM scheduling is needed since it never touches the GPU. Its system prompt provides clear guidance on how to perform most tasks.
+Agent Skills are a unified tool extension system compatible with Claude Code's skill architecture and similar frameworks like Aider's "agents" or Cursor's tools. They provide focused capabilities that the agent can discover and use during task execution — file operations, code review, security scanning, reverse engineering, etc.
 
-### Task Routing (Verified)
-| Task Type | Routed To | Verified In |
-|-----------|-----------|-------------|
-| **UI Actions** | Assistant (1B, CPU) | App.tsx layout — sidebar, editor, chat all in React |
-| **Project Management** | Assistant (1B, CPU) | SystemAIClient manages project context |
-| **Settings/Configuration** | Assistant (1B, CPU) | engineStore + dataPersistence |
-| **Git Operations** | Assistant (1B, CPU) | gitAutoCommit.ts — commit/squash/checkpoints |
-| **llama.cpp Compilation** | Assistant (1B, CPU) | systemAI.ts — compile scripts for Windows/macOS/Linux |
-| **Context Compression** | Assistant (1B, CPU) | SystemAIClient.sendMessage() summarizes history |
-| **Code Generation** | Primary (GPU/CPU) | Primary model handles complex code reasoning |
-
-### Strict System Prompts for Assistant Model (Verified)
-The 1B model operates under tightly constrained system prompts that limit its scope to safe, routine tasks. Verified at `systemAI.ts:17–38`:
+Skills appear in a **tree-view panel** alongside MCP servers, auto-suggested when contextually relevant (e.g., when reviewing C++ files, "C++ Code Audit" skill is suggested). Each skill has:
+- A name and description
+- A set of tools/commands it exposes
+- Contextual triggers (auto-detected by file type or project structure)
+- An approval cost (low for safe operations like `grep`, high for destructive ones like `rm`)
 
 ```
-You are the UI Assistant for OpenLLMCode. Your role is limited to project management, settings configuration, and engine compilation ONLY. You run on CPU and must be efficient.
-
-ALLOWED ACTIONS:
-- Clone repositories from Git providers
-- Extract template archives into project folders
-- Navigate and manage file trees
-- Configure engine backends and model settings
-- Manage HuggingFace authentication tokens
-- Execute Git operations (commit, squash, unstage)
-- Install compilers and SDKs for llama.cpp compilation
-- Run CMake builds with hardware-specific flags
-- Summarize conversation history for context compression
-
-DENIED ACTIONS:
-- Code generation or modification of source files
-- Complex reasoning about code architecture
-- Terminal command execution beyond project setup & compilation
+┌───────────────────────────────────────────────┐
+│  🔧 Agent Skills               [🔍 Search]    │
+│                                               │
+│  ── Code Quality                              │
+│  ├── 📊 C++ Code Audit                       │
+│  │     ▸ Static analysis, memory leaks       │
+│  │                                           │
+│  ├── 📊 Go Code Audit                        │
+│  │     ▸ goroutine leak detection            │
+│  │                                           │
+│  ├── 📊 Python Code Audit                    │
+│  │     ▸ type checking, security scan        │
+│  │                                           │
+│  ── Reverse Engineering                       │
+│  ├── 🔍 Binary Format Reader                 │
+│  │     ▸ PNG, PDF, SQLite, Protobuf, etc.    │
+│  │                                           │
+│  ├── 📦 .NET Assembly Inspector              │
+│  │     ▸ ILSpy/monodis decompilation         │
+│  │                                           │
+│  ── Network Tools                             │
+│  ├── 🌐 Nmap Scan                            │
+│  ├── 🌐 Wireshark Capture                    │
+│  └── ── Discreet Mode                        │
+│                                               │
+└───────────────────────────────────────────────┘
 ```
+
+### Default Skills (Pre-installed)
+| Category | Skill | Description | Auto-Suggested When |
+|----------|-------|-------------|---------------------|
+| **Shell** | `bash` / `zsh` commands | Full shell access with tool execution | Always available |
+| **Code Audit — C++** | Static analysis, memory leak detection, valgrind integration | Opening `.cpp`/`.h` files in project |
+| **Code Audit — Go** | Goroutine profiling, race detector, `go vet`/`go test -race` | Opening `.go` files |
+| **Code Audit — Python** | Type checking (`mypy`), security audit, `pylint` integration | Opening `.py` files |
+| **Code Audit — .NET** | Assembly inspection via ILSpy/MonoDis, reflection-based analysis | Opening `.dll`, `.exe`, or `.csproj` |
+| **Code Audit — Node.js** | ESLint/Prettier pipeline, `npm audit`, dependency analysis | Opening `package.json` or `.js/.ts` files |
+| **Reverse Engineering** | Binary format reader (PNG, PDF, SQLite, Protobuf, ELF, Mach-O) | When inspecting unknown/foreign file formats |
+| **.NET Assembly Inspector** | Full decompilation of .NET assemblies (.dll, .exe, .csproj) | Opening .NET binaries or projects |
+| **C/C++ Disassembler** | Ghidra-style disassembly, symbol analysis via `objdump`/`llvm-objdump` | Working with compiled binaries (.so/.dll/.exe) |
+| **Network Penetration Testing** | Nmap scanning, Wireshark capture, TCPDump, port scanning | When network tools detected in PATH |
+| — Discreet mode (stealth scan on closed ports) | Stealth scanning without triggering IDS/IPS |
+| — Concurrent host discovery | Scan multiple hosts simultaneously |
+| **Git Skills** | Blame analysis, bisect for bug finding, cherry-pick preview | When working with Git repositories |
+| **File Operations** | Diff viewer, rename refactoring, import finder | When editing source files |
+| **Security Scanners** | OWASP top 10 checks, dependency vulnerability scan, secret detection (git-secrets) | Before committing changes |
+
+### Skill Discovery & Auto-Suggestion
+- Skills are discovered on startup by scanning `.openllmcode-skills/` in the project root and `~/.openllmcode/skills/` globally
+- **Auto-suggestion engine** analyzes:
+  - File types in the current project (e.g., many `.cpp` → suggest C++ audit)
+  - Language servers available on PATH (Python, Go, Node.js)
+  - Installed tools (`nmap`, `objdump`, `ilspy`, etc.)
+  - Project configuration files (package.json → suggest npm audit; go.mod → suggest go vet)
+- Skills appear in the sidebar panel with a "✨ Suggested" badge when relevant
+
+### Skill Activation & Usage
+1. Click a skill in the tree view to activate it — tools are added to the agent's tool registry
+2. Agent receives contextual guidance on using the new skills (similar to how MCP tools work)
+3. Skills can be toggled on/off independently of each other
+4. Some skills auto-execute (e.g., "Run C++ Audit" will scan all `.cpp` files and report findings in chat)
+
+### Skill Format (YAML + Tool Definitions)
+```yaml
+name: cpp-code-audit
+description: "C++ code audit — static analysis, memory leaks, valgrind integration"
+trigger_files: ["*.cpp", "*.h", "*.hpp"]
+tools:
+  - name: run_cpp_audit
+    command: "clang-tidy --checks='*,cert-*,bugprone-*' {}"
+    approval_cost: low
+  - name: run_valgrind
+    command: "valgrind --leak-check=full ./{}"
+    approval_cost: medium
+suggested_when: ["*.cpp present in project"]
+```
+
+### Compatibility with Claude Code Skills
+- Follows the same `claude-code-skills` directory structure (`~/.claude/skills/`) for compatibility
+- Converts Claude Code skill YAML format to OpenLLMCode's internal skill representation on import
+- Can directly use `.md` skill definitions from the Claude Code ecosystem via a conversion layer
 
 ---
 
