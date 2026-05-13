@@ -114,7 +114,7 @@ export function loadConfig(): { backend: Backend; binarySource: 'prebuilt' | 'co
   }
 }
 
-export function saveConfig(cfg: typeof loadConfig()): void {
+export function saveConfig(cfg: ReturnType<typeof loadConfig>): void {
   fs.mkdirSync(getAppData(), { recursive: true });
   fs.writeFileSync(path.join(getAppData(), 'config.json'), JSON.stringify(cfg, null, 2));
 }

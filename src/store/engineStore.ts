@@ -17,15 +17,15 @@ export const useEngineStore = create<EngineState>((set) => ({
 
   setConfig: (config) => set((state) => ({ config: { ...state.config, ...config } })),
 
-  selectBackend: (backend) => set({ config: { ...useEngineStore.getState().config, backend } }),
+   selectBackend: (backend) => set((state) => ({ config: { ...state.config, backend } })),
 
-  loadModel: async (modelId) => {
-    set({ loading: true });
-    try { await window.api.chat.start({ model: modelId }); } catch {}
-    set((state) => ({
-      models: state.models.map(m => m.id === modelId ? { ...m, loaded: true } : m),
-      config: { ...state.config, selectedModel: modelId },
-      loading: false,
-    }));
-  },
+   loadModel: async (modelId) => {
+     set({ loading: true });
+     try { await window.api.chat.start({ model: modelId }); } catch {}
+     set((state) => ({
+       models: state.models.map(m => m.id === modelId ? { ...m, loaded: true } : m),
+       config: { ...state.config, selectedModel: modelId },
+       loading: false,
+     }));
+   },
 }));

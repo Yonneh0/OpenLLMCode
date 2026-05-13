@@ -65,7 +65,7 @@ export function App() {
         </aside>
 
         {/* Editor area */}
-        <main className="flex-1 flex flex-col min-w-0">
+        <main className="flex-1 flex flex-col min-h-0">
           {/* Tab bar */}
           <div className="bg-[#1e1e2e] border-b border-[#45475a] flex overflow-x-auto">
             <button className="px-4 py-2 bg-[#313244] text-sm border-r border-[#45475a] hover:bg-[#45475a]/60 transition relative">main.tsx</button>
@@ -79,16 +79,6 @@ export function App() {
               {'<span style="color:#cba6f7">export function</span> <span style="color:#89b4fa">App</span>() {"{"}\n'}
               {'  '}<span style="color:#cba6f7">const</span>[count, setCount] = useState(<span style="color:#fab387">0</span>);\n\n{'\n'}
               {'  '}<span style="color:#a6adc8">// OpenLLMCode — Local AI Coding Agent</span>{'\n'}
-              {'  '}<span style="color:#cba6f7">return</span>(<br/>'}
-              {'    '}&lt;<span style="color:#f38ba8">div</span>&gt;\n{'\n'}
-              {'      '}&lt;<span style="color:#f38ba8">h1</span>&gt;Hello, OpenLLMCode!{'\n'}
-              {'        '}&lt;<span style="color:#f38ba8">button</span> onClick={() =&gt; <span style="color:#cba6f7">setCount</span>(c =&gt; c + <span style="color:#fab387">1</span>)}&gt;\n{'\n'}
-              {'          '}Click me ({count} clicks)\n{'\n'}
-              {'        '}&lt;/<span style="color:#f38ba8">button</span>&gt;{\'\n'}
-              {'      '}&lt;/<span style="color:#f38ba8">h1</span>&gt;\n{'\n'}
-              {'    '}&lt;/<span style="color:#f38ba8">div</span>&gt;\n{'\n'}
-              {'  '});\n{'\n'}
-              {'}'}
             </pre>
           </div>
 
