@@ -27,6 +27,16 @@ interface Window {
     };
     execCommand: (command: string) => Promise<string>;
     gitCommit: (message: string) => Promise<string>;
+    git: {
+      commit: (message: string) => Promise<string>;
+      getHeadHash: () => Promise<string>;
+      createCheckpoint: (label: string) => Promise<string>;
+      restoreToCheckpoint: (checkpointHash: string) => Promise<boolean>;
+      squashCommits: (commitMessage: string, count?: number) => Promise<boolean>;
+      stash: () => Promise<boolean>;
+      stashPop: () => Promise<boolean>;
+      hasUncommitted: () => Promise<boolean>;
+    };
     chat: {
       start: (payload: Record<string, unknown>) => Promise<string>;
       sendMessage: (message: string) => Promise<string>;

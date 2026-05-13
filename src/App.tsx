@@ -1,14 +1,43 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import ApprovalGate from './components/ApprovalGate';
+import CheckpointPanel from './components/CheckpointPanel';
+import TaskPanel from './components/TaskPanel';
+import { useTaskStore } from './store/taskStore';
 
 // Note: Window.api type is declared in src/store/fileTreeStore.tsx — no duplicate declaration needed here.
 
+type AgentMode = 'plan' | 'act' | 're' | 'audit';
+
 export function App() {
+  const [mode, setMode] = useState<AgentMode>('plan');
+  const { currentTask } = useTaskStore();
+
   useEffect(() => {
     const initEngine = async () => {
       try { await window.api.engine.getConfig(); } catch {}
     };
     initEngine();
   }, []);
+
+  // Checkpoint handlers via IPC
+  const handleRestoreCheckpoint = useCallback(async (checkpointHash: string) => {
+    if (!checkpointHash) return;
+    try {
+      await window.api.git.restoreToCheckpoint(checkpointHash);
+    } catch {}
+  }, []);
+
+  const handleDeleteContextAfterCheckpoint = useCallback((checkpointId: string) => {
+    useTaskStore.getState().deleteContextAfterCheckpoint(checkpointId);
+  }, []);
+
+  // Mode labels for the title bar buttons
+  const modeButtons: Array<{ key: AgentMode; label: string }> = [
+    { key: 'plan', label: '📋 Plan' },
+    { key: 'act', label: '⚡ Act' },
+    { key: 're', label: '🔍 R/E' },
+    { key: 'audit', label: '🛡 Audit' },
+  ];
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#1e1e2e] text-white font-sans">
@@ -27,9 +56,19 @@ export function App() {
 
         {/* Mode buttons */}
         <div className="flex items-center gap-1 ml-auto">
-          <button className="px-2.5 py-0.5 rounded bg-[#45475a] text-xs font-semibold hover:bg-[#585b70] transition">📋 Plan</button>
-          <button className="px-2.5 py-0.5 rounded bg-[#313244] text-xs hover:bg-[#45475a] transition">⚡ Act</button>
-          <button className="px-2.5 py-0.5 rounded bg-[#313244] text-xs hover:bg-[#45475a] transition">🔍 R/E</button>
+          {modeButtons.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => setMode(m.key)}
+              className={`px-2.5 py-0.5 rounded text-xs font-semibold transition ${
+                mode === m.key
+                  ? 'bg-[#45475a] hover:bg-[#585b70]'
+                  : 'bg-[#313244] hover:bg-[#45475a]'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
 
         {/* Settings */}
@@ -58,6 +97,9 @@ export function App() {
               <li className="flex items-center gap-1.5 pl-8 py-1 rounded hover:bg-[#313244]/60 cursor-pointer text-sm">📄 types.ts</li>
             </ul>
           </div>
+
+          {/* Task Panel — Phase C */}
+          <TaskPanel />
 
           {/* MCP Servers */}
           <div className="px-3 py-2 border-t border-[#45475a] space-y-1.5">
@@ -96,7 +138,13 @@ export function App() {
           </div>
 
           {/* Messages */}
-          <ChatMessages />
+          <ChatMessages mode={mode} />
+
+          {/* Checkpoint Panel — Phase C */}
+          <CheckpointPanel
+            onRestore={handleRestoreCheckpoint}
+            onDeleteContextAfter={handleDeleteContextAfterCheckpoint}
+          />
 
           {/* Input area */}
           <InputArea />
@@ -105,6 +153,9 @@ export function App() {
 
       {/* Terminal panel */}
       <TerminalPanel />
+
+      {/* Approval Gate Modal — Phase C (renders on top of everything) */}
+      <ApprovalGate />
     </div>
   );
 }
@@ -127,9 +178,14 @@ function MonacoEditor() {
   );
 }
 
-function ChatMessages() {
+function ChatMessages({ mode }: { mode: AgentMode }) {
   return (
     <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      {/* Mode indicator */}
+      <div className="text-xs text-[#6c7086] mb-1">
+        Mode: {mode === 'plan' ? '📋 Plan' : mode === 'act' ? '⚡ Act' : mode === 're' ? '🔍 R/E' : '🛡 Audit'}
+      </div>
+
       <div className="mb-2 mr-auto max-w-[90%] rounded-lg p-3 text-sm bg-indigo-600/20 border border-indigo-500/30">
         <span className="text-[#a6adc8] text-xs block mb-1">🧑 You</span>
         Fix the authentication bug in src/auth/middleware.ts
@@ -192,8 +248,8 @@ function TerminalPanel() {
       <div className="flex-1 p-3 font-mono text-sm overflow-auto bg-[#181825]/40">
         <pre className="text-[#a6adc8] leading-relaxed">
           {'$ npm run dev\n'}
-          <span className="text-[#cba6f7]">&gt; openllmcode@0.1.0 dev</span>{'\n'}
-          {'>'} vite\n{'\n'}
+          {'\u003E openllmcode@0.1.0 dev\n'}
+          {'\u003E'} vite\n{'\n'}
           <span className="text-[#a6e3a1]">  VITE v5.x ready in ~280ms</span>{'\n'}
           <span className="text-[#a6adc8] opacity-70">  ➜ Local:   http://localhost:5173/\n</span>
           {'$ '}<span className="animate-pulse bg-[#cba6f7]/40 w-2 h-4 inline-block align-middle" />

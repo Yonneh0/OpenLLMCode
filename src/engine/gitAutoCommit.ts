@@ -5,8 +5,10 @@ export interface GitOptions {
   projectPath?: string;
 }
 
+const DEFAULT_PROJECT_PATH = process.cwd();
+
 // Get current git status (staged changes)
-export function getGitStatus(projectPath: string): { changed: string[]; staged: string[] } {
+export function getGitStatus(projectPath: string = DEFAULT_PROJECT_PATH): { changed: string[]; staged: string[] } {
   try {
     const output = spawnSync('git', ['status', '--porcelain'], {
       cwd: projectPath, encoding: 'utf-8'
@@ -22,12 +24,24 @@ export function getGitStatus(projectPath: string): { changed: string[]; staged: 
   }
 }
 
+// Stage all changes in the project directory
+export function gitStageAll(projectPath: string = DEFAULT_PROJECT_PATH): boolean {
+  try {
+    const result = spawnSync('git', ['add', '.'], { cwd: projectPath });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
 // Commit changes with a descriptive message
 export function gitCommit(
   message: string,
-  projectPath?: string
+  projectPath: string = DEFAULT_PROJECT_PATH
 ): boolean {
   try {
+    // Stage all changes first
+    gitStageAll(projectPath);
     const result = spawnSync('git', [
       'commit', '-m', message
     ], { cwd: projectPath });
@@ -38,14 +52,27 @@ export function gitCommit(
   }
 }
 
+// Get current HEAD hash
+export function gitGetHeadHash(projectPath: string = DEFAULT_PROJECT_PATH): string {
+  try {
+    const output = spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectPath, encoding: 'utf-8'
+    }).stdout;
+    return output.trim();
+  } catch {
+    return '';
+  }
+}
+
 // Squash all commits from a task into one
 export function gitSquashCommits(
   commitMessage: string,
-  projectPath?: string
+  count: number = 5,
+  projectPath: string = DEFAULT_PROJECT_PATH
 ): boolean {
   try {
     const result = spawnSync('git', [
-      'reset', '--soft', 'HEAD~5' // squash last ~5 commits (configurable)
+      'reset', '--soft', `HEAD~${count}` // squash last N commits (configurable)
     ], { cwd: projectPath });
 
     if (result.status !== 0) return false;
@@ -58,11 +85,11 @@ export function gitSquashCommits(
 }
 
 // Get a list of recent commits (for task completion squash detection)
-export function getRecentCommits(count: number = 10): Array<{ hash: string; message: string }> {
+export function getRecentCommits(count: number = 10, projectPath: string = DEFAULT_PROJECT_PATH): Array<{ hash: string; message: string }> {
   try {
     const output = spawnSync('git', [
       'log', '--format=%H %s', `-n`, String(count),
-    ]).stdout.toString();
+    ], { cwd: projectPath, encoding: 'utf-8' }).stdout;
 
     return output.trim().split('\n').map(line => {
       const parts = line.split(' ');
@@ -74,12 +101,16 @@ export function getRecentCommits(count: number = 10): Array<{ hash: string; mess
 }
 
 // Create a checkpoint commit (for Cline-style rollback)
-export function gitCreateCheckpoint(label: string): string {
+export function gitCreateCheckpoint(label: string, projectPath: string = DEFAULT_PROJECT_PATH): string {
   try {
-    const hash = spawnSync('git', ['rev-parse', 'HEAD']).stdout.toString().trim();
+    const hash = spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectPath, encoding: 'utf-8'
+    }).stdout.toString().trim();
+
     spawnSync('git', [
       'tag', `checkpoint-${label}-${Date.now()}`, '-f'
-    ]);
+    ], { cwd: projectPath });
+
     return hash;
   } catch {
     return '';
@@ -87,10 +118,42 @@ export function gitCreateCheckpoint(label: string): string {
 }
 
 // Restore to a checkpoint (rollback)
-export function gitRestoreToCheckpoint(checkpointHash: string): boolean {
+export function gitRestoreToCheckpoint(checkpointHash: string, projectPath: string = DEFAULT_PROJECT_PATH): boolean {
   try {
-    const result = spawnSync('git', ['reset', '--hard', checkpointHash]);
+    const result = spawnSync('git', ['reset', '--hard', checkpointHash], { cwd: projectPath });
     return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+// Stash current changes (for auto-stashing user edits)
+export function gitStash(projectPath: string = DEFAULT_PROJECT_PATH): boolean {
+  try {
+    const result = spawnSync('git', ['stash', '--include-untracked'], { cwd: projectPath });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+// Pop the most recent stash (restore user edits after AI action)
+export function gitStashPop(projectPath: string = DEFAULT_PROJECT_PATH): boolean {
+  try {
+    const result = spawnSync('git', ['stash', 'pop'], { cwd: projectPath });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+// Check if there are uncommitted changes
+export function hasUncommittedChanges(projectPath: string = DEFAULT_PROJECT_PATH): boolean {
+  try {
+    const output = spawnSync('git', ['status', '--porcelain'], {
+      cwd: projectPath, encoding: 'utf-8'
+    }).stdout;
+    return output.trim().length > 0;
   } catch {
     return false;
   }
@@ -100,12 +163,12 @@ export function gitRestoreToCheckpoint(checkpointHash: string): boolean {
 export function autoCommitAfterAction(
   actionType: string,
   filePath?: string,
-  projectPath?: string
+  projectPath: string = DEFAULT_PROJECT_PATH
 ): boolean {
   const message = `OpenLLMCode: ${actionType}${filePath ? ' — ' + filePath : ''}`;
 
   // Get current state before commit
-  const status = getGitStatus(projectPath || process.cwd());
+  const status = getGitStatus(projectPath);
   if (status.staged.length === 0) return true; // nothing to commit
 
   return gitCommit(message, projectPath);

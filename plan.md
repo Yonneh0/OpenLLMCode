@@ -4,6 +4,7 @@
 
 > ✅ **Phase A — Foundation implemented**: Core Electron shell, Engine Manager, chat UI, Git operations, Zustand stores.
 > ✅ **Phase B — HuggingFace & Chat Richness implemented**: HF auth/download, streaming UI, Markdown rendering, generation params panel.
+> ✅ **Phase C — Agent Core & Git Integration implemented**: Tool registry, approval gate UI, task lifecycle, checkpoint rollback, git stash/auto-commit wiring.
 
 ---
 
@@ -1033,17 +1034,35 @@ The system prompt is assembled dynamically from several sections. The **verified
 
 **Total Phase B: ~4 files, ~780 lines implemented.**
 
-### Phase C — Agent Core & Git Integration 🟡 **PARTIAL** (Types/Backend exist; UI not built)
+### Phase C — Agent Core & Git Integration ✅ **VERIFIED COMPLETE** (2026-05-13)
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Plan/Act/R/E/Audit modes | ✅ Verified | Mode toggle buttons in ChatPanel + TitleBar with state tracking |
-| Tool registry system | 🟡 Partial | IPC channels for file read/write/search, terminal commands exist; approval gate UI not built |
-| Approval gate UI | 🔲 Planned | Four-option dialog: Allow / Always Allow / Deny / Deny w/ Reason — types defined in plan.md only |
-| Task creation & lifecycle | 🟡 Partial | SessionStore has CRUD ops; actual task system (planning→executing→completed) not wired to agent |
+| Tool registry system | ✅ Built | `src/engine/toolRegistry.ts` — 7 default tools (read_file, write_file, create_file, delete_file, run_command, search_files, glob), registerTool(), getToolSchema() |
+| Approval gate UI | ✅ Built | `src/components/ApprovalGate.tsx` + `src/store/approvalStore.ts` — four-option dialog: Allow / Always Allow / Deny / Deny w/ Reason, diff preview, destructive operation warnings |
+| Task creation & lifecycle | ✅ Built | `src/store/taskStore.ts` — full CRUD (createTask, updateTask, deleteTask), createCheckpoint, deleteContextAfterCheckpoint, completeTask with auto-squash |
 | System prompt assembly | ✅ Verified | Dynamic system prompts per mode in systemAI.ts:17–38 |
-| Chat checkpoint system | 🟡 Partial | gitAutoCommit.ts has commit/squash/checkpoint functions; UI dropdown (Restore / Delete Context After) not built |
-| Task completion squash | 🟡 Partial | gitSquashCommits() exists in gitAutoCommit.ts; auto-trigger on task completion not wired |
-| User edits stashed automatically | 🟡 Partial | Git status tracking via getGitStatus(); stash/unstash logic not implemented |
+| Chat checkpoint system | ✅ Built | `src/components/CheckpointPanel.tsx` — Cline-style rollback panel with Restore / Delete Context After dropdown, manual creation dialog |
+| Task completion squash | ✅ Wired | completeTask() auto-calls gitSquashCommits() via IPC; taskStore handles lifecycle transition |
+| User edits stashed automatically | ✅ Built | `src/engine/gitAutoCommit.ts` — stash(), stashPop(), hasUncommittedChanges(), stageAll() functions + IPC channels in preload.ts |
+
+**Phase C Files Added/Modified:**
+| # | File | Purpose | Lines |
+|---|------|---------|-------|
+| 1 | `src/types.ts` | Extended with ToolCall, ApprovalRequest, PlanStep, Checkpoint, CompressedEntry interfaces | +30 lines |
+| 2 | `src/engine/toolRegistry.ts` | Default tool registry with 7 tools, registerTool/getToolSchema API | ~95 lines |
+| 3 | `src/store/approvalStore.ts` | Zustand store for approval gate state management | ~100 lines |
+| 4 | `src/store/taskStore.ts` | Zustand store for task lifecycle + checkpoint CRUD | ~120 lines |
+| 5 | `src/engine/gitAutoCommit.ts` | Enhanced with stash, stageAll, hasUncommittedChanges | +60 lines |
+| 6 | `electron/main.ts` | Extended IPC: git-commit, git-get-head-hash, git-create-checkpoint, git-restore-to-checkpoint, git-squash-commits, git-stash, git-stash-pop, git-has-uncommitted | +120 lines |
+| 7 | `src/components/ApprovalGate.tsx` | Four-option approval dialog with diff preview, warnings | ~165 lines |
+| 8 | `src/components/CheckpointPanel.tsx` | Cline-style checkpoint rollback panel with dropdown actions | ~145 lines |
+| 9 | `src/components/TaskPanel.tsx` | Task status display in sidebar with create/squash buttons | ~70 lines |
+| 10 | `src/App.tsx` | Integrated ApprovalGate, CheckpointPanel, TaskPanel components | +30 lines |
+| 11 | `electron/preload.ts` | Added git IPC channel bindings (8 new channels) | +25 lines |
+| 12 | `src/vite-env.d.ts` | Extended Window.api with git namespace types | +12 lines |
+
+**Total Phase C: ~12 files, ~970+ lines implemented.**
 
 ### Phase D — Editor, Terminal & Project Tooling 🟡 **PARTIAL** (Placeholders exist; real integration planned)
 | Feature | Status | Description |

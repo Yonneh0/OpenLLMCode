@@ -176,17 +176,170 @@ function registerIpc() {
     }
   });
 
-  // Git
+  // Git — Phase C: extended with checkpoint, squash, stash operations
   ipcMain.handle('git-commit', async (_e: any, message: string) => {
+    const cwd = getProjectRoot();
     return new Promise<string>((resolve) => {
       const cmd = process.platform === 'win32'
-        ? `cd "%APPDATA%\\OpenLLMCode" && git commit -m "${message}"`
-        : `cd "$HOME/.openllmcode" && git commit -m "${message}"`;
+        ? `cd "${cwd}" && git add . && git commit -m "${message}"`
+        : `cd "${cwd}" && git add . && git commit -m "${message}"`;
       spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
             [process.platform === 'win32' ? '/c' : '-c', cmd],
-            { env: process.env }).on('close', () => resolve('committed'));
+            { env: process.env, cwd }).on('close', () => resolve('committed'));
     });
   });
+
+  // Get current HEAD hash
+  ipcMain.handle('git-get-head-hash', async (_e: any) => {
+    try {
+      const { execSync } = require('child_process');
+      return execSync('git rev-parse HEAD', { cwd: getProjectRoot(), encoding: 'utf-8' }).trim();
+    } catch {
+      return '';
+    }
+  });
+
+  // Create a checkpoint (tag + commit)
+  ipcMain.handle('git-create-checkpoint', async (_e: any, label: string) => {
+    const cwd = getProjectRoot();
+    try {
+      const { execSync } = require('child_process');
+      // Stage all changes first
+      execSync('git add .', { cwd });
+      // Commit with checkpoint label
+      execSync(`git commit -m "Checkpoint: ${label}" --allow-empty`, { cwd });
+      // Get the hash
+      const hash = execSync('git rev-parse HEAD', { cwd, encoding: 'utf-8' }).trim();
+      return hash;
+    } catch {
+      return '';
+    }
+  });
+
+  // Restore to a checkpoint (hard reset)
+  ipcMain.handle('git-restore-to-checkpoint', async (_e: any, checkpointHash: string) => {
+    const cwd = getProjectRoot();
+    try {
+      const { execSync } = require('child_process');
+      execSync(`git reset --hard ${checkpointHash}`, { cwd });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  // Squash commits from a task into one
+  ipcMain.handle('git-squash-commits', async (_e: any, commitMessage: string, count: number = 5) => {
+    const cwd = getProjectRoot();
+    try {
+      const { execSync } = require('child_process');
+      // Get the hash before squashing so we know what to squash
+      const baseHash = execSync(`git rev-parse HEAD~${count}`, { cwd, encoding: 'utf-8' }).trim();
+      execSync(`git reset --soft ${baseHash}`, { cwd });
+      execSync(`git commit -m "${commitMessage}"`, { cwd });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  // Stash current changes (for auto-stashing user edits)
+  ipcMain.handle('git-stash', async () => {
+    const cwd = getProjectRoot();
+    try {
+      const { execSync } = require('child_process');
+      execSync('git stash --include-untracked', { cwd });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  // Pop the most recent stash (restore user edits)
+  ipcMain.handle('git-stash-pop', async () => {
+    const cwd = getProjectRoot();
+    try {
+      const { execSync } = require('child_process');
+      execSync('git stash pop', { cwd });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  // Check if there are uncommitted changes
+  ipcMain.handle('git-has-uncommitted', async () => {
+    const cwd = getProjectRoot();
+    try {
+      const { execSync } = require('child_process');
+      const output = execSync('git status --porcelain', { cwd, encoding: 'utf-8' }).trim();
+      return output.length > 0;
+    } catch {
+      return false;
+    }
+  });
+
+  // File search — regex across files in a directory
+  ipcMain.handle('fs-search-files', async (_e: any, payload: { path: string; regex: string; filePattern?: string }) => {
+    const cwd = getProjectRoot();
+    const searchPath = pathModule.isAbsolute(payload.path) ? payload.path : pathModule.join(cwd, payload.path);
+    try {
+      const { execSync } = require('child_process');
+      let cmd: string;
+      if (process.platform === 'win32') {
+        // Use findstr on Windows as fallback
+        cmd = `findstr /s /n /r "${payload.regex}" ${searchPath}\\*`;
+      } else {
+        const fileFilter = payload.filePattern ? ` --include="${payload.filePattern}"` : '';
+        cmd = `grep -rnE "${payload.regex}" "${searchPath}"${fileFilter}`;
+      }
+      return execSync(cmd, { cwd, encoding: 'utf-8', maxBuffer: 1024 * 1024 }).trim();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return `Search error: ${msg}`;
+    }
+  });
+
+  // Glob — find files matching a pattern
+  ipcMain.handle('fs-glob', async (_e: any, payload: { pattern: string; path?: string }) => {
+    const cwd = getProjectRoot();
+    const baseDir = payload.path ? (pathModule.isAbsolute(payload.path) ? payload.path : pathModule.join(cwd, payload.path)) : cwd;
+    try {
+      // Use Node's built-in fs for recursive glob matching
+      const results: string[] = [];
+      function walk(dir: string) {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = pathModule.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(fullPath);
+          } else {
+            // Simple glob matching
+            const relPath = pathModule.relative(cwd, fullPath);
+            if (simpleGlobMatch(relPath, payload.pattern)) {
+              results.push(relPath);
+            }
+          }
+        }
+      }
+      walk(baseDir);
+      return results.join('\n');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return `Glob error: ${msg}`;
+    }
+  });
+
+  // Simple glob matching helper for fs-glob IPC
+  function simpleGlobMatch(filePath: string, pattern: string): boolean {
+    // Convert glob to regex
+    const regex = new RegExp(
+      '^' + pattern.replace(/\./g, '\\.').replace(/\*\*/g, '___DOUBLESTAR___')
+        .replace(/\*/g, '[^/]*').replace(/___DOUBLESTAR___/g, '.*') + '$',
+      'i'
+    );
+    return regex.test(filePath);
+  }
 
   // Chat / Inference — Fix #1: use full path to llama-server binary from engines dir; Fix #2: stdout listener emits IPC chat-response events
   let llamaServerPort = 8080;

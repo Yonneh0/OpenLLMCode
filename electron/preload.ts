@@ -26,13 +26,28 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('file-tree-changed', handler);
       return () => ipcRenderer.removeListener('file-tree-changed', handler);
     },
+
+    // Phase C — File search & glob
+    searchFiles: (payload: { path: string; regex: string; filePattern?: string }) =>
+      ipcRenderer.invoke('fs-search-files', payload),
+    glob: (payload: { pattern: string; path?: string }) =>
+      ipcRenderer.invoke('fs-glob', payload),
   },
 
   // Terminal
   execCommand: (command: string) => ipcRenderer.invoke('exec-command', command),
 
-  // Git
-  gitCommit: (message: string) => ipcRenderer.invoke('git-commit', message),
+  // Git — Phase C extended with checkpoint, squash, stash operations
+  git: {
+    commit: (message: string) => ipcRenderer.invoke('git-commit', message),
+    getHeadHash: () => ipcRenderer.invoke('git-get-head-hash'),
+    createCheckpoint: (label: string) => ipcRenderer.invoke('git-create-checkpoint', label),
+    restoreToCheckpoint: (checkpointHash: string) => ipcRenderer.invoke('git-restore-to-checkpoint', checkpointHash),
+    squashCommits: (commitMessage: string, count?: number) => ipcRenderer.invoke('git-squash-commits', commitMessage, count ?? 5),
+    stash: () => ipcRenderer.invoke('git-stash'),
+    stashPop: () => ipcRenderer.invoke('git-stash-pop'),
+    hasUncommitted: () => ipcRenderer.invoke('git-has-uncommitted'),
+  },
 
   // Chat / Inference
   chat: {
@@ -62,5 +77,14 @@ contextBridge.exposeInMainWorld('api', {
   electronStore: {
     getConfig: () => ipcRenderer.invoke('electron-store-get-config'),
     setConfig: (key: string, value: unknown) => ipcRenderer.invoke('electron-store-set-config', key, value),
+  },
+
+  // Phase C — Approval events (main → renderer notifications)
+  approval: {
+    onApprovalRequest: (callback: Callback) => {
+      const handler = (_e: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('approval-request', handler);
+      return () => ipcRenderer.removeListener('approval-request', handler);
+    },
   },
 });
