@@ -1,23 +1,81 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import ApprovalGate from './components/ApprovalGate';
 import CheckpointPanel from './components/CheckpointPanel';
 import TaskPanel from './components/TaskPanel';
-import { useTaskStore } from './store/taskStore';
+import MonacoEditor from './components/MonacoEditor';
+import XTermTerminal from './components/XTermTerminal';
+import ProjectWizard from './components/ProjectWizard';
+import { ChatPanel } from './components/ChatPanel';
+import type { AgentMode } from './types';
+import { TitleBar } from './components/TitleBar';
+import { useFileTreeStore, FileItem } from './store/fileTreeStore';
 
-// Note: Window.api type is declared in src/store/fileTreeStore.tsx — no duplicate declaration needed here.
+// Mode labels — single source of truth for mode toggle display
+const MODE_LABELS: Record<AgentMode, string> = {
+  plan: '📋 Plan',
+  act: '⚡ Act',
+  re: '🔍 R/E',
+  audit: '🛡 Audit',
+};
 
-type AgentMode = 'plan' | 'act' | 're' | 'audit';
+// File tree component — connected to store
+function FileTree() {
+  const files = useFileTreeStore((s) => s.files);
+  const rootPath = useFileTreeStore((s) => s.rootPath);
+  const loading = useFileTreeStore((s) => s.loading);
+  const expandedDirs = useFileTreeStore((s) => s.expandedDirs);
+  const toggleDir = useFileTreeStore((s) => s.toggleDir);
 
+  // Fix #4: File watcher is initialized from Sidebar's useEffect — no need to duplicate here (Issue #4)
+
+  if (loading) {
+    return <div className="text-xs text-[#6c7086]">Loading...</div>;
+  }
+
+  // Render tree recursively — use proper FileItem type from store
+  function renderTree(items: FileItem[], depth: number = 0) {
+    return items.map((item) => (
+      <li key={item.path} className="select-none">
+        <div
+          className={`flex items-center gap-1.5 pl-2 py-1 rounded hover:bg-[#313244]/60 cursor-pointer text-sm ${depth > 0 ? `ml-${(depth + 1) * 4}px` : ''}`}
+          onClick={() => item.type === 'directory' && toggleDir(item.path)}
+        >
+          <span className="text-xs flex-shrink-0">
+            {item.type === 'directory' ? (expandedDirs.has(item.path) ? '📂' : '📁') : fileIcon(item.name)}
+          </span>
+          <span className="truncate">{item.name}</span>
+        </div>
+        {item.type === 'directory' && expandedDirs.has(item.path) && item.children && (
+          <ul>{renderTree(item.children, depth + 1)}</ul>
+        )}
+      </li>
+    ));
+  }
+
+  return files.length > 0 ? (
+    <ul className="space-y-0.5">{renderTree(files)}</ul>
+  ) : (
+    <div className="text-xs text-[#6c7086]">No project open</div>
+  );
+}
+
+// Simple file icon based on extension — Fix #15: Use local interface since module resolution fails in strict mode (Issue #15)
+function fileIcon(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  const icons: Record<string, string> = {
+    ts: '🔷', tsx: '⚛️', js: '📜', jsx: '⚛️',
+    py: '🐍', go: '🔵', rs: '🦀', cs: '💜', java: '☕',
+    cpp: '⚙️', c: '⚙️', h: '⚙️', css: '🎨', html: '🌐',
+    json: '📋', md: '📝', yaml: '⚙️', yml: '⚙️', sh: '💻', sql: '🗃️',
+  };
+  return icons[ext] ?? '📄';
+}
+
+// Fix #15: No module-level store access — all components get their own hook call (Issue #15)
 export function App() {
   const [mode, setMode] = useState<AgentMode>('plan');
+  const [showWizard, setShowWizard] = useState(false);
   const { currentTask } = useTaskStore();
-
-  useEffect(() => {
-    const initEngine = async () => {
-      try { await window.api.engine.getConfig(); } catch {}
-    };
-    initEngine();
-  }, []);
 
   // Checkpoint handlers via IPC
   const handleRestoreCheckpoint = useCallback(async (checkpointHash: string) => {
@@ -31,49 +89,10 @@ export function App() {
     useTaskStore.getState().deleteContextAfterCheckpoint(checkpointId);
   }, []);
 
-  // Mode labels for the title bar buttons
-  const modeButtons: Array<{ key: AgentMode; label: string }> = [
-    { key: 'plan', label: '📋 Plan' },
-    { key: 'act', label: '⚡ Act' },
-    { key: 're', label: '🔍 R/E' },
-    { key: 'audit', label: '🛡 Audit' },
-  ];
-
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#1e1e2e] text-white font-sans">
-      {/* Title bar */}
-      <header className="h-10 bg-[#313244] border-b border-[#45475a] flex items-center px-3 gap-3 flex-shrink-0 select-none">
-        <div className="flex items-center gap-2 mr-2">
-          <span className="text-lg">🚀</span>
-          <span className="font-semibold text-sm">OpenLLMCode</span>
-        </div>
-
-        {/* Model selector */}
-        <select defaultValue="ibm-grok4-1b.Q8_0" className="px-2 py-0.5 rounded bg-[#1e1e2e] border border-[#45475a] text-sm">
-          <option value="ibm-grok4-1b.Q8_0">📦 ibm-grok4-1b.Q8_0 (CPU)</option>
-          <option value="qwen3.6-35b.A3B">Qwen3.6-35B-A3B (CUDA)</option>
-        </select>
-
-        {/* Mode buttons */}
-        <div className="flex items-center gap-1 ml-auto">
-          {modeButtons.map((m) => (
-            <button
-              key={m.key}
-              onClick={() => setMode(m.key)}
-              className={`px-2.5 py-0.5 rounded text-xs font-semibold transition ${
-                mode === m.key
-                  ? 'bg-[#45475a] hover:bg-[#585b70]'
-                  : 'bg-[#313244] hover:bg-[#45475a]'
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Settings */}
-        <button className="ml-2 p-1.5 rounded hover:bg-[#45475a] transition" title="Settings">⚙️</button>
-      </header>
+      {/* Title bar — mode buttons and model selector live here only (via TitleBar component) */}
+      <TitleBar mode={mode} onModeChange={(m: AgentMode) => setMode(m)} />
 
       {/* Main content: sidebar | editor + chat */}
       <main className="flex-1 flex min-h-0">
@@ -84,18 +103,14 @@ export function App() {
             <h2 className="text-xs font-semibold text-[#a6adc8] uppercase tracking-wider mb-1">Project</h2>
             <div className="flex gap-1.5 mt-2">
               <button className="flex-1 px-2 py-1.5 rounded bg-[#313244] hover:bg-[#45475a] text-sm transition" title="Change Root">📂</button>
-              <button className="px-2 py-1.5 rounded bg-[#313244] hover:bg-[#45475a] transition" title="New Project">+</button>
+              <button onClick={() => setShowWizard(true)} className="px-2 py-1.5 rounded bg-[#313244] hover:bg-[#45475a] transition" title="New Project">+</button>
             </div>
           </div>
 
-          {/* File tree */}
+          {/* File tree — connected to store */}
           <div className="flex-1 overflow-y-auto px-3 py-2">
             <h2 className="text-xs font-semibold text-[#a6adc8] uppercase tracking-wider mb-1 mt-1">Files</h2>
-            <ul className="space-y-0.5">
-              <li className="flex items-center gap-1.5 pl-2 py-1 rounded hover:bg-[#313244]/60 cursor-pointer text-sm">📁 src/</li>
-              <li className="flex items-center gap-1.5 pl-8 py-1 rounded hover:bg-[#313244]/60 cursor-pointer text-sm">📄 main.tsx</li>
-              <li className="flex items-center gap-1.5 pl-8 py-1 rounded hover:bg-[#313244]/60 cursor-pointer text-sm">📄 types.ts</li>
-            </ul>
+            <FileTree />
           </div>
 
           {/* Task Panel — Phase C */}
@@ -108,155 +123,34 @@ export function App() {
           </div>
         </aside>
 
-        {/* Editor area */}
+        {/* Editor area — MonacoEditor includes its own tab bar and status bar */}
         <main className="flex-1 flex flex-col min-h-0">
-          {/* Tab bar */}
-          <div className="bg-[#1e1e2e] border-b border-[#45475a] flex overflow-x-auto">
-            <button className="px-4 py-2 bg-[#313244] text-sm border-r border-[#45475a] hover:bg-[#45475a]/60 transition relative">main.tsx</button>
-            <button className="px-4 py-2 bg-[#181825]/60 text-sm border-r border-[#45475a] hover:bg-[#313244]/60 transition">types.ts</button>
-          </div>
-
-          {/* Monaco Editor placeholder */}
           <MonacoEditor />
-
-          {/* Breadcrumbs + status */}
-          <div className="px-4 py-1 bg-[#313244] border-t border-[#45475a] text-xs text-[#a6adc8] flex items-center justify-between">
-            <span>src/ → App.tsx</span>
-            <span className="ml-auto">Ln 1, Col 1 | UTF-8 | TypeScript</span>
-          </div>
         </main>
 
-        {/* Chat panel */}
+        {/* Chat panel — uses Phase B ChatPanel with streaming, Markdown, etc. */}
         <aside className="w-[420px] border-l border-[#45475a] flex-shrink-0 flex flex-col">
-          {/* Session header */}
-          <div className="px-3 py-2 border-b border-[#45475a] bg-[#181825]/40 flex items-center gap-2">
-            <span className="text-sm font-semibold text-[#a6adc8]">Chat</span>
-            <select defaultValue={1} className="ml-auto bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-1 text-xs">
-              <option value={1}>Session 1</option>
-            </select>
-            <button className="px-2 py-0.5 bg-[#313244] hover:bg-[#45475a] rounded text-xs transition" title="New Session">+ New</button>
-          </div>
-
-          {/* Messages */}
-          <ChatMessages mode={mode} />
-
-          {/* Checkpoint Panel — Phase C */}
+          {/* Checkpoint Panel — Phase C (shown between header and ChatPanel) */}
           <CheckpointPanel
             onRestore={handleRestoreCheckpoint}
             onDeleteContextAfter={handleDeleteContextAfterCheckpoint}
           />
 
-          {/* Input area */}
-          <InputArea />
+          {/* Chat messages — Phase B ChatPanel component handles its own session header + streaming UI */}
+          <ChatPanel />
         </aside>
       </main>
 
-      {/* Terminal panel */}
-      <TerminalPanel />
+      {/* Terminal panel — real xterm.js with PTY streaming */}
+      <XTermTerminal />
 
       {/* Approval Gate Modal — Phase C (renders on top of everything) */}
       <ApprovalGate />
+
+      {/* Project Creation Wizard — Phase D */}
+      <ProjectWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
     </div>
   );
 }
 
-function MonacoEditor() {
-  const codeLines = [
-    '<span style="color:#cba6f7">import</span> React {"{ useState }"} <span style="color:#cba6f7">from</span> <span style="color:#a6e3a1">"react"</span>',
-    '',
-    '<span style="color:#cba6f7">export function</span> <span style="color:#89b4fa">App</span>() {',
-    '  <span style="color:#cba6f7">const</span>[count, setCount] = useState(<span style="color:#fab387">0</span>)',
-    '',
-    '  <span style="color:#a6adc8">// OpenLLMCode — Local AI Coding Agent</span>',
-    '}',
-  ].join('\n');
-
-  return (
-    <div className="flex-1 bg-[#1e1e2e] p-4 overflow-auto font-mono text-sm leading-relaxed">
-      <pre className="text-[#cdd6f4] whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: codeLines }} />
-    </div>
-  );
-}
-
-function ChatMessages({ mode }: { mode: AgentMode }) {
-  return (
-    <div className="flex-1 overflow-y-auto p-3 space-y-2">
-      {/* Mode indicator */}
-      <div className="text-xs text-[#6c7086] mb-1">
-        Mode: {mode === 'plan' ? '📋 Plan' : mode === 'act' ? '⚡ Act' : mode === 're' ? '🔍 R/E' : '🛡 Audit'}
-      </div>
-
-      <div className="mb-2 mr-auto max-w-[90%] rounded-lg p-3 text-sm bg-indigo-600/20 border border-indigo-500/30">
-        <span className="text-[#a6adc8] text-xs block mb-1">🧑 You</span>
-        Fix the authentication bug in src/auth/middleware.ts
-      </div>
-
-      <div className="mb-2 ml-auto max-w-[90%] rounded-lg p-3 text-sm bg-[#1e1e2e]/50 border border-[#45475a]">
-        <span className="text-[#a6adc8] text-xs block mb-1">🤖 Agent</span>
-        I'll investigate the auth middleware. Let me read the file first to understand the current implementation.<br/>
-
-        <div className="mt-2 rounded bg-[#181825]/60 border border-[#45475a] p-2 text-xs flex items-center gap-2">
-          🔧 read_file — <span className="text-[#a6e3a1]">completed</span>
-        </div>
-
-        I found the issue. The JWT verification is using an expired secret key.<br/>
-
-        <div className="mt-2 rounded bg-[#181825]/60 border border-[#45475a] p-2 text-xs flex items-center gap-2">
-          🔧 run_command — <span className="text-[#f9e2af]">running</span>
-        </div>
-      </div>
-
-      {/* Timestamp */}
-      <div className="mt-1 text-xs text-[#a6adc8] opacity-50">
-        {new Date(Date.now()).toLocaleTimeString()}
-      </div>
-    </div>
-  );
-}
-
-function InputArea() {
-  return (
-    <div className="p-3 border-t border-[#45475a] bg-[#181825]/40">
-      <textarea placeholder="💬 Type a message..." rows={3}
-        className="w-full resize-none rounded bg-[#1e1e2e] border border-[#45475a] px-3 py-2 text-sm focus:outline-none focus:border-[#cba6f7]" />
-
-      <div className="flex items-center gap-2 mt-2">
-        <button className="px-2.5 py-1 rounded bg-[#313244] hover:bg-[#45475a] text-xs transition" title="Attach file">📎 Attach</button>
-
-        {/* Generation parameters */}
-        <select defaultValue="0.7" className="ml-auto bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-1 text-xs">
-          <option value="0.7">T: 0.7</option>
-          <option value="0.9">T: 0.9</option>
-        </select>
-
-        {/* Send button */}
-        <button className="px-4 py-1 rounded bg-[#cba6f7] hover:bg-[#b4befe] text-black font-semibold text-xs transition">▶ Send</button>
-      </div>
-    </div>
-  );
-}
-
-function TerminalPanel() {
-  return (
-    <div className="h-48 flex-shrink-0 bg-[#1e1e2e] border-t border-[#45475a] flex flex-col">
-      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[#45475a] bg-[#181825]/60">
-        <button className="px-3 py-1 rounded bg-[#313244] text-xs font-semibold hover:bg-[#45475a]/60 transition">Terminal</button>
-        <button className="px-3 py-1 rounded text-xs hover:bg-[#313244]/60 transition opacity-70 hover:opacity-100">Output</button>
-        <button className="ml-auto px-2 py-0.5 rounded bg-[#1e1e2e] border border-[#45475a] text-xs opacity-70 hover:opacity-100 transition">⚙️</button>
-      </div>
-
-      <div className="flex-1 p-3 font-mono text-sm overflow-auto bg-[#181825]/40">
-        <pre className="text-[#a6adc8] leading-relaxed">
-          {'$ npm run dev\n'}
-          {'\u003E openllmcode@0.1.0 dev\n'}
-          {'\u003E'} vite\n{'\n'}
-          <span className="text-[#a6e3a1]">  VITE v5.x ready in ~280ms</span>{'\n'}
-          <span className="text-[#a6adc8] opacity-70">  ➜ Local:   http://localhost:5173/\n</span>
-          {'$ '}<span className="animate-pulse bg-[#cba6f7]/40 w-2 h-4 inline-block align-middle" />
-        </pre>
-      </div>
-
-      <div className="h-1.5 cursor-row-resize hover:bg-[#cba6f7]/30 transition-colors" />
-    </div>
-  );
-}
+// Note: Window.api type is declared in src/vite-env.d.ts — no duplicate declaration needed here.

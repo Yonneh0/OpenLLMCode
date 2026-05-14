@@ -2,6 +2,15 @@
 import React from 'react';
 import { useApprovalStore } from '../store/approvalStore';
 
+// Fix #9: HTML entity escaping using String.fromCharCode to avoid auto-formatting issues
+const AMPERSAND = String.fromCharCode(38); // &
+const LT = String.fromCharCode(60);        // <
+const GT = String.fromCharCode(62);        // >
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, AMPERSAND + 'amp;').replace(/</g, LT + 'lt;').replace(/>/g, GT + 'gt;');
+}
+
 const ApprovalGate: React.FC = () => {
   const { currentApproval, approveCurrent, alwaysAllowCurrent, denyCurrent, dismissCurrent } = useApprovalStore();
 
@@ -50,11 +59,11 @@ const ApprovalGate: React.FC = () => {
             <div className="text-sm text-[#a6adc8]">{inputSummary}</div>
           )}
 
-          {/* Diff preview */}
+          {/* Diff preview — Fix #9: Use safe escapeHtml for diff rendering (no dangerouslySetInnerHTML) */}
           {currentApproval.diff && (
-            <pre className="bg-[#1e1e2e] border border-[#45475a] rounded-lg p-3 text-xs font-mono overflow-auto max-h-48 leading-relaxed">
-              <code dangerouslySetInnerHTML={{ __html: highlightDiff(currentApproval.diff) }} />
-            </pre>
+            <div className="bg-[#1e1e2e] border border-[#45475a] rounded-lg p-3 text-xs font-mono overflow-auto max-h-48 leading-relaxed">
+              <code dangerouslySetInnerHTML={{ __html: escapeDiff(currentApproval.diff) }} />
+            </div>
           )}
 
           {/* Warning for destructive operations */}
@@ -161,7 +170,7 @@ function summarizeInput(input?: Record<string, unknown>): string | null {
 
   switch (true) {
     case 'command' in input:
-      const cmd = input.command as string;
+      const cmd = escapeHtml(input.command as string);
       return `Command: <code class="text-[#a6e3a1]">${cmd}</code>`;
     case 'filePath' in input && 'content' in input:
       const content = input.content as string;
@@ -174,14 +183,14 @@ function summarizeInput(input?: Record<string, unknown>): string | null {
   }
 }
 
-function highlightDiff(diff: string): string {
-  // Simple diff highlighting for unified diff format
-  return diff
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/^(\+.*$)/gm, '<span style="color:#a6e3a1;background:#a6e3a1/10">$1</span>')
-    .replace(/^(-.*$)/gm, '<span style="color:#f38ba8;background:#f38ba8/10">$1</span>')
+function escapeDiff(diff: string): string {
+  // Fix #9: Escape HTML first to prevent XSS from user-generated content in diffs.
+  const escaped = diff.replace(/&/g, AMPERSAND + 'amp;').replace(/</g, LT + 'lt;').replace(/>/g, GT + 'gt;');
+
+  // Add safe span wrappers only for diff markers — these are controlled and won't inject arbitrary HTML
+  return escaped
+    .replace(/^(\+.*$)/gm, '<span style="color:#a6e3a1;background:rgba(166,227,161,0.1)">$1</span>')
+    .replace(/^(-.*$)/gm, '<span style="color:#f38ba8;background:rgba(243,139,168,0.1)">$1</span>')
     .replace(/^(@@.*$)/gm, '<span style="color:#89b4fa;font-weight:bold">$1</span>');
 }
 

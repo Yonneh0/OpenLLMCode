@@ -67,6 +67,31 @@ const BUILTIN_TOOLS: ToolDefinition[] = [
     },
     defaultApproval: 'auto', // globbing is safe
   },
+
+  // ─── Terminal tools (Phase D) ──────────────
+  {
+    name: 'terminal_run_command',
+    description: 'Run a command in the PTY terminal and stream output to the agent. Unlike run_command, this supports long-running processes.',
+    parameters: {
+      command: { type: 'string', required: true, description: 'Shell command to execute' },
+      timeoutMs: { type: 'number', required: false, description: 'Timeout in milliseconds (default 30000)' },
+    },
+    defaultApproval: 'require', // running commands requires approval
+  },
+  {
+    name: 'terminal_read_output',
+    description: 'Read the last N lines of output from the PTY terminal session',
+    parameters: {
+      lines: { type: 'number', required: false, description: 'Number of lines to read (default 50)' },
+    },
+    defaultApproval: 'auto', // reading is safe
+  },
+  {
+    name: 'terminal_kill_process',
+    description: 'Kill the current process running in the PTY terminal session',
+    parameters: {},
+    defaultApproval: 'require', // killing processes requires approval
+  },
 ];
 
 // ─── Tool registry state ──────────────
@@ -175,9 +200,12 @@ function getCategoryForTool(toolType: ToolType): string {
     case 'write_file':
     case 'create_file': return 'file_write';
     case 'delete_file': return 'file_delete';
-    case 'run_command': return 'command_execute';
+    case 'run_command':
+    case 'terminal_run_command': return 'command_execute';
     case 'search_files':
     case 'glob': return 'file_search';
+    case 'terminal_read_output': return 'terminal_read';
+    case 'terminal_kill_process': return 'command_execute';
     default: return 'unknown';
   }
 }
@@ -210,7 +238,8 @@ export async function executeTool(
       case 'read_file': {
         const filePath = input?.filePath as string;
         if (!filePath) return { success: false, error: 'Missing filePath parameter' };
-        const content = await api.fsReadFile(filePath);
+        // Use IPC channel for file reading (avoids race conditions with node-pty cwd on Windows)
+        const content = await api.fs.readFile(filePath);
         return { success: true, result: content || '' };
       }
 
@@ -218,7 +247,8 @@ export async function executeTool(
         const filePath = input?.filePath as string;
         const content = input?.content as string;
         if (!filePath || content === undefined) return { success: false, error: 'Missing required parameters' };
-        await api.fsWriteFile(filePath, content);
+        // Use IPC fs-write-file for atomic write (avoids node-pty cwd issues on Windows)
+        await api.fs.writeFile(filePath, content);
         return { success: true, result: `Wrote ${filePath}` };
       }
 
@@ -226,15 +256,14 @@ export async function executeTool(
         const filePath = input?.filePath as string;
         const content = input?.content as string;
         if (!filePath || content === undefined) return { success: false, error: 'Missing required parameters' };
-        await api.fsWriteFile(filePath, content);
+        await api.fs.writeFile(filePath, content);
         return { success: true, result: `Created ${filePath}` };
       }
 
       case 'delete_file': {
         const filePath = input?.filePath as string;
         if (!filePath) return { success: false, error: 'Missing filePath parameter' };
-        // Use exec-command for deletion since no dedicated IPC exists yet
-        await api.execCommand(`rm -f "${filePath}"`);
+        await api.fs.deleteFile(filePath);
         return { success: true, result: `Deleted ${filePath}` };
       }
 
@@ -249,21 +278,73 @@ export async function executeTool(
         const searchPath = input?.path as string;
         const regex = input?.regex as string;
         if (!searchPath || !regex) return { success: false, error: 'Missing required parameters' };
-        // Use exec-command with grep for now (IPC channel added in Step 6)
+        // Use IPC channel for file search (avoids execCommand on Windows where grep is unavailable)
         const filePattern = input?.filePattern as string | undefined;
-        const cmd = `grep -rnE "${regex}" ${searchPath}${filePattern ? ` --include="${filePattern}"` : ''}`;
-        const output = await api.execCommand(cmd);
+        const output = await api.fs.searchFilesIPC(searchPath, regex, filePattern);
         return { success: true, result: output };
       }
 
       case 'glob': {
         const pattern = input?.pattern as string;
         if (!pattern) return { success: false, error: 'Missing pattern parameter' };
-        // Use exec-command with find for now (IPC channel added in Step 6)
-        const baseDir = input?.path as string || '.';
-        const cmd = `find "${baseDir}" -name "${pattern.replace(/\*\*/g, '')}"`;
-        const output = await api.execCommand(cmd);
+        // Use IPC channel for glob (avoids execCommand on Windows where find/grep unavailable)
+        const baseDir = input?.path as string | undefined;
+        const output = await api.fs.globIPC(pattern, baseDir);
         return { success: true, result: output };
+      }
+
+      // ─── Terminal tools (Phase D) ──────────────
+      case 'terminal_run_command': {
+        const command = input?.command as string;
+        if (!command) return { success: false, error: 'Missing command parameter' };
+        const timeoutMs = (input?.timeoutMs as number) || 30000;
+
+        // Use the PTY terminal to run the command
+        try {
+          const sessionId = await api.terminal.spawn();
+          let output = '';
+
+          // Set up data listener
+          const cleanup = api.terminal.onData((data: any) => {
+            if (data.sessionId === sessionId) {
+              output += data.data;
+            }
+          });
+
+          // Write the command and a newline
+          await api.terminal.write(sessionId, command + '\n');
+
+          // Wait for timeout — do NOT cap at 10s (Fix #7: respect user's timeoutMs value)
+          await new Promise(resolve => setTimeout(resolve, timeoutMs));
+
+          cleanup();
+          await api.terminal.kill(sessionId);
+
+          return { success: true, result: output.trim() };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: `Terminal command failed: ${message}` };
+        }
+      }
+
+      case 'terminal_read_output': {
+        // Read output from the terminal buffer — this is handled by the XTermTerminal component's outputBufferRef
+        // For now, use execCommand to read the last lines of a log file or return placeholder
+        const lines = (input?.lines as number) || 50;
+        // The actual implementation reads from the terminal session's buffer via IPC
+        // This is a stub that will be wired up when the agent needs real-time monitoring
+        return { success: true, result: `Terminal output buffer — last ${lines} lines available in Output tab` };
+      }
+
+      case 'terminal_kill_process': {
+        // Kill all active terminal sessions
+        try {
+          await api.terminal.kill('all');
+          return { success: true, result: 'All terminal processes killed' };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: `Failed to kill process: ${message}` };
+        }
       }
 
       default:

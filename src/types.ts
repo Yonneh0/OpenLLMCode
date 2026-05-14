@@ -27,7 +27,11 @@ export type ToolType =
   | 'delete_file'
   | 'run_command'
   | 'search_files'
-  | 'glob';
+  | 'glob'
+  // Terminal tools (Phase D)
+  | 'terminal_run_command'
+  | 'terminal_read_output'
+  | 'terminal_kill_process';
 
 export interface ToolCall {
   id: string;

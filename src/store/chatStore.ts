@@ -9,6 +9,7 @@ interface ChatState {
   setLoading: (loading: boolean) => void;
   appendToLastAssistant: (chunk: string) => void;
   clearSession: () => void;
+  stopStreaming: () => void;
 }
 
 let messageIdCounter = Date.now();
@@ -48,4 +49,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearSession: () => set({ messages: [] }),
+
+  stopStreaming: () => {
+    // Cancel any ongoing streaming animation and mark all assistant messages as non-streaming
+    set({ 
+      isSending: false,
+      messages: get().messages.map((m) => (m.role === 'assistant' ? { ...m, streaming: false } : m))
+    });
+  },
 }));

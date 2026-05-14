@@ -1,5 +1,7 @@
-import React, { useEffect } from 'react';
-import { useFileTreeStore, initFileWatcher, FileItem } from '../store/fileTreeStore';
+// Sidebar component — replaced by inline JSX in App.tsx (no longer imported)
+// Kept here for reference — can be deleted if unused.
+import React from 'react';
+import { useFileTreeStore, FileItem } from '../store/fileTreeStore';
 
 // ─── Recursive file tree item ──────────────────────────────
 function TreeItem({ item, depth = 0 }: { item: FileItem; depth?: number }) {
@@ -55,14 +57,11 @@ function getFileIcon(name: string): string {
 }
 
 // ─── Sidebar component ──────────────────────────────────────
+// Note: This component is no longer used — App.tsx renders sidebar inline instead.
 export function Sidebar() {
   const { files, loading, setRootPath } = useFileTreeStore();
 
-  // Initialize file watcher on mount
-  useEffect(() => {
-    initFileWatcher();
-  }, []);
-
+  // NOTE: File watcher initialization was moved to App.tsx useEffect (Issue #4 fix)
   const handleChangeFolder = async () => {
     try {
       const folder = await window.api.dialog.selectFolder();

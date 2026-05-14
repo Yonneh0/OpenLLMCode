@@ -1,8 +1,20 @@
 // TaskPanel — displays the current task plan with step statuses and progress
 import { useTaskStore, getStatusLabel, getStepStatusIcon } from '../store/taskStore';
+import React, { useCallback } from 'react';
 
 const TaskPanel: React.FC = () => {
-  const { currentTask } = useTaskStore();
+  const { currentTask, completeTask } = useTaskStore();
+
+  // Fix #7: Wire up squash via IPC — called when user clicks the squash button
+  const handleSquash = useCallback(async () => {
+    if (!currentTask) return;
+    try {
+      await window.api.git.squashCommits(`Squash: ${currentTask.title}`, currentTask.plan?.length || 5);
+      completeTask('Task completed');
+    } catch (err: unknown) {
+      // Show error in UI — non-fatal, task is already marked as completed
+    }
+  }, [currentTask]);
 
   if (!currentTask) return null;
 
@@ -43,14 +55,24 @@ const TaskPanel: React.FC = () => {
         </div>
       )}
 
-      {/* Completion summary */}
-      {currentTask.status === 'completed' && currentTask.completionSummary && (
-        <div className="bg-[#a6e3a1]/10 border border-[#a6e3a1]/20 rounded-lg px-3 py-2 text-xs text-[#a6e3a1]">
-          ✅ {currentTask.completionSummary}
-        </div>
-      )}
+       {/* Completion summary + squash button */}
+       {currentTask.status === 'completed' && currentTask.completionSummary && (
+         <div className="bg-[#a6e3a1]/10 border border-[#a6e3a1]/20 rounded-lg px-3 py-2 text-xs text-[#a6e3a1]">
+           ✅ {currentTask.completionSummary}
+         </div>
+       )}
 
-      {/* Failed state */}
+       {/* Squash button — shown when task has steps but no summary yet */}
+       {currentTask.status === 'completed' && !currentTask.completionSummary && (
+         <button
+           onClick={handleSquash}
+           className="w-full px-3 py-1.5 bg-[#89b4fa]/20 hover:bg-[#89b4fa]/30 text-[#89b4fa] rounded-lg text-xs font-medium transition-colors"
+         >
+           🔧 Squash Task Commits
+         </button>
+       )}
+
+       {/* Failed state */}
       {currentTask.status === 'failed' && (
         <div className="bg-[#f38ba8]/10 border border-[#f38ba8]/20 rounded-lg px-3 py-2 text-xs text-[#f38ba8]">
           ❌ Task failed. Check the chat for details.

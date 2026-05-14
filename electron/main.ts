@@ -154,6 +154,59 @@ function registerIpc() {
 
   ipcMain.handle('fs-stop-watcher', () => { stopFileWatcher(); return true; });
 
+  // ─── PTY Terminal (node-pty) ──────────────────────────────
+  const nodePty = require('node-pty');
+  let terminalSessions: Map<string, any> = new Map();
+
+  ipcMain.handle('terminal-spawn', async () => {
+    const cwd = getProjectRoot();
+    // Detect default shell
+    const shell = process.platform === 'win32'
+      ? (process.env.COMSPEC || 'cmd.exe')
+      : (process.env.SHELL || '/bin/bash');
+
+    const pty = nodePty.spawn(shell, [], {
+      name: 'xterm-256color',
+      cols: 80,
+      rows: 24,
+      cwd,
+      env: process.env as any,
+    });
+
+    const sessionId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    terminalSessions.set(sessionId, pty);
+
+    // Forward PTY output to renderer
+    pty.on('data', (data: string) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('terminal-data', { sessionId, data });
+      }
+    });
+
+    return sessionId;
+  });
+
+  ipcMain.handle('terminal-write', async (_e: any, sessionId: string, data: string) => {
+    const pty = terminalSessions.get(sessionId);
+    if (pty) pty.write(data);
+    return true;
+  });
+
+  ipcMain.handle('terminal-resize', async (_e: any, sessionId: string, cols: number, rows: number) => {
+    const pty = terminalSessions.get(sessionId);
+    if (pty) pty.resize(cols, rows);
+    return true;
+  });
+
+  ipcMain.handle('terminal-kill', async (_e: any, sessionId: string) => {
+    const pty = terminalSessions.get(sessionId);
+    if (pty) {
+      try { pty.kill(); } catch {}
+    }
+    terminalSessions.delete(sessionId);
+    return true;
+  });
+
   // Terminal — Fix #5: spawn with cwd set to projectRoot so commands run in the user's project directory
   ipcMain.handle('exec-command', async (_e: any, command: string) => {
     const cwd = getProjectRoot();
@@ -263,6 +316,19 @@ function registerIpc() {
       execSync('git stash pop', { cwd });
       return true;
     } catch {
+      return false;
+    }
+  });
+
+  // File deletion — cross-platform (Fix #5b)
+  ipcMain.handle('fs-delete-file', async (_e: any, filePath: string) => {
+    const fullPath = pathModule.isAbsolute(filePath) ? filePath : pathModule.join(getProjectRoot(), filePath);
+    try {
+      fs.unlinkSync(fullPath);
+      return true;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      mainWindow?.webContents.send('fs-error', `Failed to delete file: ${msg}`);
       return false;
     }
   });
@@ -559,9 +625,10 @@ function _start() {
 // Guard against plain-node execution where require('electron') returns a string path
 const _electron = getElectron();
 if (typeof _electron === 'string' || typeof _electron.app === 'undefined') {
-  console.log('[main] Electron runtime detected, starting...');
-  _start();
+  // Not in Electron runtime — nothing to do here
+  console.log('[main] Skipping Electron startup: not in Electron runtime');
 } else {
+  // Fix #2: In Electron runtime, call _start() once and let its internal guard prevent double-initialization
   _start();
 }
 

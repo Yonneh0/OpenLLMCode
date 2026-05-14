@@ -27,15 +27,37 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('file-tree-changed', handler);
     },
 
-    // Phase C — File search & glob
+    // Phase C — File search & glob, deletion
+    deleteFile: (filePath: string) => ipcRenderer.invoke('fs-delete-file', filePath),
     searchFiles: (payload: { path: string; regex: string; filePattern?: string }) =>
       ipcRenderer.invoke('fs-search-files', payload),
     glob: (payload: { pattern: string; path?: string }) =>
       ipcRenderer.invoke('fs-glob', payload),
+
+    // Phase C — File tree operations via IPC (for agent tools)
+    searchFilesIPC: async (searchPath: string, regex: string, filePattern?: string): Promise<string> => {
+      const result = await ipcRenderer.invoke('fs-search-files', { path: searchPath, regex, filePattern });
+      return result || '';
+    },
+    globIPC: async (pattern: string, baseDir?: string): Promise<string> => {
+      const result = await ipcRenderer.invoke('fs-glob', { pattern, path: baseDir });
+      return result || '';
+    },
   },
 
-  // Terminal
-  execCommand: (command: string) => ipcRenderer.invoke('exec-command', command),
+  // Terminal — PTY-based streaming terminal + legacy execCommand
+  terminal: {
+    spawn: () => ipcRenderer.invoke('terminal-spawn') as Promise<string>,
+    write: (sessionId: string, data: string) => ipcRenderer.invoke('terminal-write', sessionId, data),
+    resize: (sessionId: string, cols: number, rows: number) => ipcRenderer.invoke('terminal-resize', sessionId, cols, rows),
+    kill: (sessionId: string) => ipcRenderer.invoke('terminal-kill', sessionId),
+    onData: (callback: Callback) => {
+      const handler = (_e: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('terminal-data', handler);
+      return () => ipcRenderer.removeListener('terminal-data', handler);
+    },
+  },
+  execCommand: (command: string) => ipcRenderer.invoke('exec-command', command), // legacy
 
   // Git — Phase C extended with checkpoint, squash, stash operations
   git: {
