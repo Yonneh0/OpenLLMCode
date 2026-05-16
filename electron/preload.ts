@@ -271,7 +271,7 @@ contextBridge.exposeInMainWorld('api', {
   appShutdown: () => ipcRenderer.invoke('app-shutdown'),
 
    // ─── MCP API (renderer → main process) ──────────────────────────────
-   mcp?: {
+   mcp: {
      getToolNames: () => ipcRenderer.invoke('mcp-get-tool-names'),
      callTool: (toolName: string, params?: Record<string, unknown>) => 
        ipcRenderer.invoke('mcp-call-tool', toolName, params || {}),
