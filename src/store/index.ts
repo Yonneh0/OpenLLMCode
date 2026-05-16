@@ -26,7 +26,7 @@ export { useMCPStore } from './mcpStore';
 // Pingu Store — System AI avatar state and animations (Phase G-2)
 export * from './pinguStore';
 
-// MCP tool execution helpers — wired via mcpManager → toolRegistry (Phase E)
+// MCP tool execution helpers — wired via window.api.mcp instead of require() for renderer compatibility
 export { getAllMCPToolNames, executeMCPToolCall } from './engineLoggerStore';
 
 // Model Settings Store — per-model inference settings (Phase F-1)

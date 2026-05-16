@@ -66,18 +66,24 @@ export interface Api {
   approval: {
     onApprovalRequest: (callback: Callback) => () => void;
   };
-  engineLogging: {
-    start: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
-    stop: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
-    getLogEntries: (engineId: 'primary' | 'systemAI', includeDisk?: boolean) => Promise<unknown[]>;
-    clearLogEntries: (engineId: 'primary' | 'systemAI') => Promise<void>;
-    getConfig: () => Promise<Record<string, unknown>>;
-    setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => Promise<boolean>;
-    onEngineData: (callback: Callback) => () => void;
-    onLogEntry: (callback: Callback) => () => void;
-  };
-  appShutdown: () => Promise<void>;
-}
+   engineLogging: {
+     start: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
+     stop: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
+     getLogEntries: (engineId: 'primary' | 'systemAI', includeDisk?: boolean) => Promise<unknown[]>;
+     clearLogEntries: (engineId: 'primary' | 'systemAI') => Promise<void>;
+     getConfig: () => Promise<Record<string, unknown>>;
+     setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => Promise<boolean>;
+     onEngineData: (callback: Callback) => () => void;
+     onLogEntry: (callback: Callback) => () => void;
+   };
+   appShutdown: () => Promise<void>;
+
+   // MCP API — for renderer → main process IPC communication for MCP tools and tool names
+   mcp?: {
+     getToolNames: () => Promise<string[]>;
+     callTool: (toolName: string, params?: Record<string, unknown>) => Promise<unknown>;
+   };
+ }
 
 // QEMU/KVM Simulation Layer API types — mirrors the IPC handler signatures in preload.ts  
 export interface QemuAPI {
@@ -264,8 +270,15 @@ contextBridge.exposeInMainWorld('api', {
   // App shutdown cleanup
   appShutdown: () => ipcRenderer.invoke('app-shutdown'),
 
-  // ─── QEMU/KVM Simulation Layer API ──────────────────────────────  
-  qemu: {
+   // ─── MCP API (renderer → main process) ──────────────────────────────
+   mcp?: {
+     getToolNames: () => ipcRenderer.invoke('mcp-get-tool-names'),
+     callTool: (toolName: string, params?: Record<string, unknown>) => 
+       ipcRenderer.invoke('mcp-call-tool', toolName, params || {}),
+   },
+
+   // ─── QEMU/KVM Simulation Layer API ──────────────────────────────  
+   qemu: {
     // VM lifecycle — per QMP commands from vm-run-state and monitor sections of QMP spec  
     create: (config: Record<string, unknown>) => ipcRenderer.invoke('qemu-vm-create', config),
     start: (vmId: string) => ipcRenderer.invoke('qemu-vm-start', vmId),

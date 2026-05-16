@@ -829,8 +829,31 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
     return await (tm as any).getProjectToolchains(projectDir);
   });
 
-  // ─── App shutdown cleanup — extended for QEMU processes ──────────────────────────────  
-  ipcMain.handle('app-shutdown', () => {
+   // ─── MCP API (renderer → main process) — tools come from mcpManager.ts ✓
+   ipcMain.handle('mcp-get-tool-names', async () => {
+     try {
+       const mcpMgr = await import('../src/engine/mcpManager');
+       const names = mcpMgr.getMCPToolNames();
+       return Array.isArray(names) ? (names as string[]) : [];
+     } catch {
+       console.warn('Failed to get MCP tool names');
+       return [];
+     }
+   });
+
+   ipcMain.handle('mcp-call-tool', async (_e: any, serverToolName: string, params?: Record<string, unknown>) => {
+     try {
+       const mcpMgr = await import('../src/engine/mcpManager');
+       const result = await mcpMgr.callMCPTool(serverToolName, params);
+       return result;
+     } catch (err) {
+       console.warn('Failed to call MCP tool:', serverToolName, err);
+       throw new Error(`MCP tool "${serverToolName}" failed: ${err instanceof Error ? err.message : String(err)}`);
+     }
+   });
+
+   // ─── App shutdown cleanup — extended for QEMU processes ──────────────────────────────  
+   ipcMain.handle('app-shutdown', () => {
     stopFileWatcher();
     if (llamaCppProcess) llamaCppProcess.kill();
     if (systemAIProcess) systemAIProcess.kill();
@@ -881,10 +904,11 @@ function startApp() {
 }
 
 // ─── App Lifecycle (top-level) ──────────────────────────────────────
-if (process.platform === 'win32' || process.env.ELECTRON_RUN_AS_NODE) {
-  // In Electron renderer context, skip app startup
-  console.log('[main] Skipping Electron startup: not in main process');
+if (process.env.ELECTRON_RUN_AS_NODE) {
+  // In Electron renderer context, skip app startup — this happens when the preload script runs in the renderer process
+  console.log('[main] Skipping Electron startup: running in Node.js context');
 } else if (app && typeof app.whenReady === 'function') {
+  // Normal Electron main process path — start the application
   app.whenReady().then(startApp);
   app.on('window-all-closed', () => { 
     stopFileWatcher();
@@ -894,6 +918,8 @@ if (process.platform === 'win32' || process.env.ELECTRON_RUN_AS_NODE) {
     stopFileWatcher();
     if (llamaCppProcess) llamaCppProcess.kill();
     if (systemAIProcess) systemAIProcess.kill();
+    // Also clean up all running QEMU VMs on shutdown — same pattern as existing cleanup above  
+    try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any
   });
 } else {
   console.log('[main] Skipping Electron startup: not in Electron runtime');

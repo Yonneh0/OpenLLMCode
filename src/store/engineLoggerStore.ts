@@ -158,6 +158,31 @@ export function filterLogEntries(entries: EngineLogEntry[], level?: LogLevel | '
   });
 }
 
+// ─── MCP helper — use window.api.mcp instead of require() for renderer compatibility ──────────────
+// Note: This is a fallback — actual MCP tool calls come through the approval store.
+
+async function getMCPToolNames(): Promise<string[]> {
+  try {
+    const mcp = (window as any).api?.mcp;
+    if (!mcp) return [];
+    const result = await mcp.getToolNames();
+    if (Array.isArray(result)) return result as string[];
+  } catch {}
+  // Fallback: empty list — no MCP tools available yet
+  console.warn('MCP manager not loaded — cannot get tool names');
+  return [];
+}
+
+async function callMCPTool(serverToolName: string, params?: Record<string, unknown>): Promise<any> {
+  try {
+    const mcp = (window as any).api?.mcp;
+    if (!mcp) throw new Error('MCP manager not loaded');
+    const result = await mcp.callTool(serverToolName, params || {});
+    if (result && typeof result === 'object') return result;
+  } catch {}
+  throw new Error(`MCP tool "${serverToolName}" is not available — MCP manager not loaded`);
+}
+
 // ─── Helper functions to call engineLogger from the store — wired via IPC ──────────────
 
 export async function startPrimaryLogging(): Promise<void> {
@@ -266,26 +291,25 @@ function setEngineLogEntries(
   }
 }
 
-// ─── Helper to get all available MCP tool names — wired via mcpManager → toolRegistry ──────────────
-export function getAllMCPToolNames(): string[] {
-  // This will be populated by the agent core when MCP tools are registered.
-  const mcpManager = require('../engine/mcpManager.js');
-  if (mcpManager && typeof mcpManager.getMCPToolNames === 'function') {
-    return mcpManager.getMCPToolNames();
-  }
-  // Fallback: empty list means no MCP tools are available yet
-  console.warn('MCP manager not loaded — cannot get tool names');
-  return [];
-}
+ // ─── Helper to get all available MCP tool names — wired via mcpManager → toolRegistry ──────────────
+ export async function getAllMCPToolNames(): Promise<string[]> {
+   // This will be populated by the agent core when MCP tools are registered.
+   try {
+     return await getMCPToolNames();
+   } catch {
+     console.warn('MCP manager not loaded — cannot get tool names');
+     return [];
+   }
+ }
 
-// ─── Helper to call an MCP tool — wired via mcpManager → toolRegistry ──────────────
-export async function executeMCPToolCall(serverToolName: string, params?: Record<string, unknown>): Promise<any> {
-  const mcpManager = require('../engine/mcpManager.js');
-  if (mcpManager && typeof mcpManager.callMCPTool === 'function') {
-    return mcpManager.callMCPTool(serverToolName, params);
-  }
-  throw new Error(`MCP tool "${serverToolName}" is not available — MCP manager not loaded`);
-}
+ // ─── Helper to call an MCP tool — wired via window.api.mcp instead of require() for renderer compatibility ──────────────
+ export async function executeMCPToolCall(serverToolName: string, params?: Record<string, unknown>): Promise<any> {
+   try {
+     return await callMCPTool(serverToolName, params);
+   } catch (err) {
+     throw new Error(`MCP tool "${serverToolName}" is not available — MCP manager not loaded`);
+   }
+ }
 
 // ─── Register the IPC event handler for engine data during app initialization ──────────────
 export function registerEngineDataHandler(): void {

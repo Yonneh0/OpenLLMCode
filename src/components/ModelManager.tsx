@@ -185,17 +185,43 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
 }
 
 interface ModelCardProps {
-  model?: LocalModelInfo;
-  hf?: { id: string; author: string; tags: string[]; downloads: number; likes: number };
-  isCurrent?: boolean;
-  onModelSelect?: (modelId: string) => void;
-  onHFSelect?: (modelId: string) => void;
-  openSettingsPanel?: () => void;
-  settingsOpen?: boolean;
-}
+   model?: LocalModelInfo;
+   hf?: { id: string; author: string; tags: string[]; downloads: number; likes: number };
+   isCurrent?: boolean;
+   onModelSelect?: (modelId: string) => void;
+   onHFSelect?: (modelId: string) => void;
+   openSettingsPanel?: () => void;
+   settingsOpen?: boolean;
+ }
 
-function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettingsPanel, settingsOpen }: ModelCardProps) {
-  const [isDownloading, setIsDownloading] = useState(false);
+ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettingsPanel, settingsOpen }: ModelCardProps) {
+   const [isDownloading, setIsDownloading] = useState(false);
+   // Per-model file details from HuggingFace API (Phase B: real metadata display in download queue)
+   const [fileDetails, setFileDetails] = useState<Array<{ fileName: string; sizeBytes: number; format?: string }>>([]);
+
+   useEffect(() => {
+     if (!hf?.id) return;
+     
+     // Capture the modelId to avoid closure issues — eslint-disable-line @typescript-eslint/no-explicit-any
+     const modelId = hf.id;  // Use dynamic import (ESM) instead of require() to avoid browser runtime errors
+     
+     async function loadFileDetails(): Promise<void> {  // eslint-disable-line @typescript-eslint/no-explicit-any
+       try {
+         const hfClientModule = await import('../engine/hfClient');
+         const details = await hfClientModule.getModelFileDetails(modelId);
+         setFileDetails(details);
+       } catch (err) {
+         console.warn('Failed to fetch model file details:', err);  // Silently fail if API call fails (e.g., no auth)
+       }
+     }
+     
+     loadFileDetails();
+   }, [hf?.id]);
+
+   // Get the best file for download — prefer largest GGUF, default to first if none found
+   const downloadFile = fileDetails.length > 0 ? fileDetails.reduce((a: { sizeBytes: number; format?: string; fileName: string }, b: { sizeBytes: number; format?: string; fileName: string }) => a.sizeBytes > b.sizeBytes ? a : b) : null;
+   const displayFormat = downloadFile?.format || 'Q8_0';
+
   // Per-model settings state (Phase F-1)
   const [contextWindow, setContextWindow] = useState(0);
   const [gpuLayers, setGpuLayers] = useState(-1);
@@ -208,16 +234,16 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettin
           <span className="text-sm font-medium">📁 {hf.id.split('/').pop() || 'Unknown'}</span>
           {isCurrent && <span className="text-xs px-1.5 py-0.5 rounded bg-[#007ACC]/20 text-[#569CD6] border border-[#007ACC]/40">✓ Loaded</span>}
         </div>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs opacity-60">GGUF • Q8_0 • 1.9 GB</span>
-          <button 
-            onClick={() => onHFSelect?.(hf.id)} 
-            disabled={isDownloading}
-            className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#DCDCAA]/30 text-[#DCDCAA]' : 'bg-[#007ACC] hover:bg-[#1177BB] text-white'}`}
-          >
-            {isDownloading ? '⬇ Downloading...' : '▶ Download'}
-          </button>
-        </div>
+       <div className="flex items-center justify-between mb-2">
+         <span className="text-xs opacity-60">GGUF • {downloadFile?.format || displayFormat} • {(downloadFile ? Math.round(downloadFile.sizeBytes / (1048576)) : 1900) + ' MB'}</span>
+         <button 
+           onClick={() => onHFSelect?.(hf.id)} 
+           disabled={isDownloading}
+           className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#DCDCAA]/30 text-[#DCDCAA]' : 'bg-[#007ACC] hover:bg-[#1177BB] text-white'}`}
+         >
+           {isDownloading ? '⬇ Downloading...' : '▶ Download'}
+         </button>
+       </div>
       </div>
     );
   }
