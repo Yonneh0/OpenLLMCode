@@ -127,11 +127,12 @@ export async function connectServer(config: MCPServerConfig): Promise<MCPServer>
       // Connect to the server — this establishes the HTTP connection and receives SSE events
       await client.connect(sseTransport);
       
-      // Start keepalive ping for SSE connection (prevents proxy/firewall timeouts)
+      // Start keepalive for SSE connection (prevents proxy/firewall timeouts)
+      // Use the SSE transport's eventSource to send a periodic GET request
       const interval = setInterval(() => {
         try {
-          // Use MCP ping to check if server is still alive
-          client.ping().catch(() => {});
+          // Send a minimal HTTP GET to the SSE URL — this keeps the connection alive without sending any data
+          fetch(config.url!, { method: 'GET', headers: { Accept: 'text/event-stream' } }).catch(() => {});
         } catch {
           // Keepalive failed — server may have disconnected, cleanup handled by disconnectServer
         }

@@ -4,6 +4,7 @@ import ApprovalGate from './components/ApprovalGate';
 import CheckpointPanel from './components/CheckpointPanel';
 import TaskPanel from './components/TaskPanel';
 import { McpPanel } from './components/McpPanel';
+import { PinguAvatar } from './components/PinguAvatar';
 import { MonacoEditor } from './components/MonacoEditor';
 import { XTermTerminal } from './components/XTermTerminal';
 import { ProjectWizard } from './components/ProjectWizard';
@@ -141,6 +142,9 @@ export function App() {
 
       {/* Project Creation Wizard */}
       <ProjectWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
+
+      {/* Pingu Avatar — System AI mascot in corner of UI */}
+      <PinguAvatar position="bottom-right" />
     </div>
   );
 }

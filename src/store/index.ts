@@ -23,8 +23,14 @@ export {
 // MCP Store — exported for UI-side MCP server management and tool registration
 export { useMCPStore } from './mcpStore';
 
+// Pingu Store — System AI avatar state and animations (Phase G-2)
+export * from './pinguStore';
+
 // MCP tool execution helpers — wired via mcpManager → toolRegistry (Phase E)
 export { getAllMCPToolNames, executeMCPToolCall } from './engineLoggerStore';
+
+// Model Settings Store — per-model inference settings (Phase F-1)
+export { useModelSettingsStore, handleModelsLoaded } from './modelSettingsStore';
 
 // Data persistence utilities (not a store so can be re-exported as values)
 export * from './dataPersistence';
