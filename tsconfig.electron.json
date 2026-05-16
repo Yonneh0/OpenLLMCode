@@ -1,22 +1,22 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx",
+    "target": "ES2021",
+    "module": "commonjs",
+    "lib": ["ES2021"],
+    "types": ["node"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
-    "isolatedModules": true,
+    "isolatedModules": false,
     "allowJs": true,
     "noEmitOnError": false,
     "declaration": true,
-    "outDir": "./dist",
-    "rootDir": "."
+    "outDir": "./dist/electron",
+    "rootDir": "./electron"
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "release-builds"]
+  "include": ["./electron/main.ts"],
+  "exclude": ["node_modules"]
 }

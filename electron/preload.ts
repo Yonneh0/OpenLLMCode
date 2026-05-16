@@ -101,12 +101,30 @@ contextBridge.exposeInMainWorld('api', {
     setConfig: (key: string, value: unknown) => ipcRenderer.invoke('electron-store-set-config', key, value),
   },
 
-  // Phase C — Approval events (main → renderer notifications)
-  approval: {
-    onApprovalRequest: (callback: Callback) => {
-      const handler = (_e: unknown, data: unknown) => callback(data);
-      ipcRenderer.on('approval-request', handler);
-      return () => ipcRenderer.removeListener('approval-request', handler);
-    },
-  },
-});
+   // Phase C — Approval events (main → renderer notifications)
+   approval: {
+     onApprovalRequest: (callback: Callback) => {
+       const handler = (_e: unknown, data: unknown) => callback(data);
+       ipcRenderer.on('approval-request', handler);
+       return () => ipcRenderer.removeListener('approval-request', handler);
+     },
+   },
+
+   // Phase E — Engine logging (real-time monitoring of both engines during reasoning blocks)
+   engineLogging: {
+     start: (engineId: 'primary' | 'systemAI') => ipcRenderer.invoke('engine-logging-start', engineId),
+     stop: (engineId: 'primary' | 'systemAI') => ipcRenderer.invoke('engine-logging-stop', engineId),
+     getConfig: () => ipcRenderer.invoke('engine-logging-get-config'),
+     setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => ipcRenderer.invoke('engine-logging-set-config', config),
+     onEngineData: (callback: Callback) => {
+       const handler = (_e: unknown, data: unknown) => callback(data);
+       ipcRenderer.on('engine-logging-data', handler);
+       return () => ipcRenderer.removeListener('engine-logging-data', handler);
+     },
+     onLogEntry: (callback: Callback) => {
+       const handler = (_e: unknown, entry: unknown) => callback(entry);
+       ipcRenderer.on('engine-logging-log', handler);
+       return () => ipcRenderer.removeListener('engine-logging-log', handler);
+     },
+   },
+ });

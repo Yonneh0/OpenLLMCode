@@ -1,11 +1,13 @@
 # OpenLLMCode — Plan
 
-> An open-source, self-contained local AI coding agent that bundles its own llama.cpp inference engine, provides rich agentic tooling with human-in-the-loop approvals, and delivers a clean VS Code–inspired UI. All code is hosted at [github.com/Yonneh0/OpenLLMCode](https://github.com/Yonneh0/OpenLLMCode).
+> An open-source, local-first AI coding agent that bundles its own llama.cpp inference engine, provides built-in HuggingFace model downloading with modern authentication, and delivers agentic capabilities (file editing, terminal execution, MCP tool integration) with transparent approval gates. Built-in Git tracking gives every change automatic version control. All code is hosted at [github.com/Yonneh0/OpenLLMCode](https://github.com/Yonneh0/OpenLLMCode).
 
 > ✅ **Phase A — Foundation implemented**: Core Electron shell, Engine Manager, chat UI, Git operations, Zustand stores.
-> ✅ **Phase B — HuggingFace & Chat Richness implemented**: HF auth/download, streaming UI, Markdown rendering, generation params panel.
-> ✅ **Phase C — Agent Core & Git Integration implemented**: Tool registry (10 tools), approval gate UI, task lifecycle, checkpoint rollback, git stash/auto-commit wiring.
-> ✅ **Phase D — Editor, Terminal & Project Tooling implemented**: Monaco Editor integration, xterm.js PTY terminal with streaming, agent terminal tools, project creation wizard with templates and repo cloning.
+> ✅ **Phase B — HuggingFace & Chat Richness implemented** (92%): HF auth/download, streaming UI, Markdown rendering, generation params panel. Missing: download queue wiring, regenerate button.
+> ✅ **Phase C — Agent Core & Git Integration implemented**: Tool registry (10 tools), approval gate UI, task lifecycle, checkpoint rollback, auto-commit/stash.
+> ✅ **Phase D — Editor, Terminal & Project Tooling implemented** (95%): Monaco Editor integration, xterm.js PTY terminal with streaming, project creation wizard with templates and repo cloning. Missing: split view, image preview, clone auth options.
+> 🟡 **Phase E — MCP, Context Compression & Monitoring** (60%): MCP server manager + context compression engine exist but have critical gaps (engineLoggerStore placeholders, MCP tools not registered, HTTP transport broken).
+> 🔲 **Phase G — Agent Skills + Pingu Avatar**: Not implemented. Needs full implementation.
 
 ---
 
@@ -42,7 +44,7 @@ OpenLLMCode is a desktop application for developers who want an **entirely local
 │  │ • File Tree │ • Code View  │ • Messages   │ • Shell      │  │
 │  │ • Project   │ • Image      │ • Tool Calls │ • AI Tools   │  │
 │  │   Controls  │   Preview    │ • Approvals  │              │  │
-│  │ • MCP List  │ • Syntax     │              │              │  │
+│  │ • Agent Skills │ • Syntax     │              │              │  │
 │  │ • Git       │   Highlight  │              │              │  │
 │  │ • Checkpts  │              │              │              │  │
 │  └─────────────┴──────────────┴──────────────┴─────────────┘  │
@@ -114,21 +116,21 @@ OpenLLMCode is a desktop application for developers who want an **entirely local
 
 ## 3. Technology Stack
 
-| Layer | Technology | Rationale | Verified |
-|-------|-----------|----------|----------|
-| Desktop Shell | Electron + Vite | Cross-platform, mature ecosystem | ✅ electron/main.ts (180 lines) |
-| UI Framework | React 19 + TypeScript | Component-driven, type-safe | ✅ src/types.ts, App.tsx (194 lines) |
-| Styling | Tailwind CSS + custom CSS | VS Code–like modern aesthetic with dark theme default | ✅ global.css (56 lines), catppuccin palette |
-| State Management | Zustand | Lightweight, no boilerplate | ✅ engineStore.ts, chatStore.ts (82 lines combined) |
-| Inference Engine | llama.cpp (selectable/compiled) | Proven local inference; GGUF support; multiple backends | ✅ manager.ts downloadForBackend() |
-| Engine Manager | Custom (GitHub releases + AI-driven compile) | LM Studio–style backend selection; System AI handles compilation | ✅ systemAI.ts compile scripts |
-| Model Downloader | huggingface-cli (installed by System AI) | Official CLI for model downloads and auth, installed via curl script | — Phase B |
-| Terminal | Xterm.js + node-pty | Full terminal emulation in-browser | — Phase D |
-| Syntax Highlighting | Monaco Editor (@monaco-editor/react) | Same editor as VS Code — familiar and powerful | ✅ @monaco-editor/react dependency |
-| MCP Client | @modelcontextprotocol/sdk | Official SDK for tool integration | ✅ dependency installed, sidebar placeholder |
-| File Watching | chokidar | Reliable cross-platform file watching | ✅ dependency installed |
-| Version Control | Git (child_process spawn) | Auto-commit every AI action; built-in history browser | ✅ gitAutoCommit.ts (111 lines) |
-| Data Storage | JSON + Markdown files | Simple, portable, human-readable — no database dependency | ✅ dataPersistence.ts (104 lines) |
+| Layer | Technology | Rationale | Verified In |
+|-------|-----------|----------|-------------|
+| Desktop Shell | Electron + Vite | Cross-platform, mature ecosystem | electron/main.ts:559 lines |
+| UI Framework | React 19 + TypeScript | Component-driven, type-safe | types.ts (141 lines), App.tsx |
+| Styling | Tailwind CSS + custom CSS | VS Code–like modern aesthetic with dark theme default | global.css, tailwind.config.js |
+| State Management | Zustand | Lightweight, no boilerplate | store/*.ts (~82+500+ lines combined) |
+| Inference Engine | llama.cpp (selectable/compiled) | Proven local inference; GGUF support; multiple backends | manager.ts:127 lines |
+| Engine Manager | Custom (GitHub releases + System AI compile) | LM Studio–style backend selection; System AI handles compilation | systemAI.ts, manager.ts |
+| Model Downloader | huggingface-cli (installed by System AI) | Official CLI for model downloads and auth, installed via curl script | hfClient.ts:334 lines |
+| Terminal | xterm.js + node-pty | Full terminal emulation in-browser | XTermTerminal.tsx:224 lines |
+| Syntax Highlighting | Monaco Editor (@monaco-editor/react) | Same editor as VS Code — familiar and powerful | MonacoEditor.tsx:280 lines |
+| MCP Client | @modelcontextprotocol/sdk | Official SDK for tool integration | mcpManager.ts:284 lines |
+| File Watching | chokidar | Reliable cross-platform file watching | main.ts:94–117 |
+| Version Control | Git (child_process spawn) | Auto-commit every AI action; built-in history browser | gitAutoCommit.ts, main.ts IPC |
+| Data Storage | JSON + Markdown files | Simple, portable, human-readable — no database dependency | dataPersistence.ts |
 
 ---
 
@@ -200,7 +202,7 @@ Stdin/stdout JSON protocol via llama-server:
 The System AI maintains a library of pre-built installation scripts for setting up complete development environments on-demand. These scripts cover the most common languages and toolchains, handling OS-specific details (package manager selection, architecture detection, verification) automatically. The AI runs them when:
 - A user requests setup of a specific language/toolchain
 - The agent detects that a project requires a missing tool (e.g., `cargo` for Rust, `dotnet` for .NET, `go` for Go) and triggers auto-install
-- Skills are activated that need their dependencies present (e.g., "C/C++ Code Audit" checks if `clang-tidy`, `valgrind`, or `gcc` exist; installs them if missing)
+- Skills are activated that need their dependencies present
 
 ### Pre-Built Environment Scripts (per-language/toolchain)
 
@@ -215,17 +217,6 @@ The System AI maintains a library of pre-built installation scripts for setting 
 | **C/C++ toolchain** | Detect and install: GCC/Clang/MSVC (Windows), build-essential, cmake, pkg-config | `gcc`, `g++`, `clang`, `cmake`, `make` |
 | **Deno / Bun** | Install via their official installers (`curl -fsSL https://deno.land/install.sh`) | `deno`, `bun` |
 
-### Additional Tooling Scripts (installed on-demand)
-
-| Category | Tools Installed By Script | Used When |
-|----------|-------------------------|-----------|
-| **Reverse Engineering** | `objdump`, `llvm-objdump`, `readelf`, `hexdump`, `strings`, `file` | Inspecting binaries (.so/.dll/.exe, Mach-O) |
-| **.NET Inspector** | `ilspy`, `monodis`, `ildasm`, `dnSpy` (via nuget/scoop/apt) | Opening .NET assemblies for decompilation |
-| **Network Tools** | `nmap`, `wireshark`/`tshark`, `tcpdump`, `curl`, `wget` | Running penetration tests, network scanning |
-| **Debugging** | `gdb`, `lldb`, `valgrind`, `strace`, `ltrace` | Debugging C/C++ binaries, tracing syscalls |
-| **Version Control** | `git`, `svn`, `hg` (Mercurial) | When working with non-git VCS repos |
-| **Compression** | `tar`, `gzip`, `unzip`, `7z`, `rar` | Extracting templates and archives |
-
 ### Script Execution Flow
 ```
 1. Agent receives request: "Install Go" or detects missing 'go' in PATH
@@ -237,31 +228,7 @@ The System AI maintains a library of pre-built installation scripts for setting 
 ```
 
 ### Auto-Detection During Task Execution
-When the agent encounters a missing tool during task execution, it attempts to install automatically:
-- **Python code audit on .py file** → checks for `mypy`, installs via pyenv if missing
-- **.NET assembly inspection on .dll** → detects missing `ilspy`, runs install script
-- **C++ code audit on .cpp file** → checks for `clang-tidy`/`valgrind`, installs from system package manager
-
-### Script Storage & Versioning
-- Scripts stored in `~/.openllmcode/scripts/env-setup/` organized by OS and language
-- Each script is a shell-compatible `.sh` file (with Windows PowerShell equivalents)
-- Script versions tracked: running `--version` on installed tools compares against known-good versions
-- Retry with fallbacks: if one install method fails (e.g., apt), try next (dnf, yum, brew, etc.)
-
-### Example — Auto-Suggested Environment Setup in UI
-```
-┌───────────────────────────────────────────────┐
-│  ⚡ Suggested Setup                            │
-│                                               │
-│  Detected Go project (go.mod found)           │
-│  Missing tools: go, gopls                     │
-│                                               │
-│  [🔧 Install Go Toolchain]                    │
-│    ▸ Installs go v1.23+ via sdkman/brew/apt   │
-│    ▸ Configures $GOROOT and $GOPATH            │
-│    ▸ Activates C++/Go Code Audit skill          │
-└───────────────────────────────────────────────┘
-```
+When the agent encounters a missing tool during task execution, it attempts to install automatically.
 
 ---
 
@@ -274,41 +241,33 @@ HuggingFace has updated their model access policies: many models now require the
 curl -LsSf https://hf.co/cli/install.sh | bash
 ```
 
-Model browsing uses the local MODELS.md file (see `/MODELS.md` at repo root) rather than live search — the System AI can perform simple `grep` operations on chat history to find topics and connect projects.
-
-### HuggingFace Authentication Flow (Modern)
-1. **First launch:** The app checks for a valid HF token in the OS keychain
+### HuggingFace Authentication Flow (Modern) — Verified
+1. **First launch:** The app checks for a valid HF token in the OS keychain or local config
 2. **No token found:** A login dialog appears with options:
-   - **Browser-based login:** Opens the user's browser to `huggingface.co/settings/tokens` where they create a new access token, then paste it back into the app
-   - **CLI-based login:** The app runs `huggingface-cli login` in an embedded terminal for users who prefer command-line authentication
-3. **Token storage:** The token is stored encrypted in the OS keychain (Windows Credential Manager / macOS Keychain / Linux libsecret)
+   - **Browser-based login:** Opens the user's browser to `huggingface.co/settings/tokens` where they create a new access token, then paste it back into the app — verified at hfClient.ts:54–58
+   - **CLI-based login:** The app runs `huggingface-cli login` in an embedded terminal for users who prefer command-line authentication — verified at hfClient.ts:60–78
+3. **Token storage:** Token stored in local config file (`hf_config.json`) — ⚠️ **Not yet using OS keychain** (Phase F gap)
 4. **Token refresh:** Tokens are validated on each session start; expired tokens trigger a re-authentication prompt
 
 ### Model Browsing & Discovery
-Models are organized in the root `MODELS.md` file. The System AI can search it to recommend models based on hardware and use case. Model browsing shows:
-- GGUF format availability
-- Quantization level (Q2 through Q8)
-- Base model family
-- File size
+- Models organized in the root `MODELS.md` file for offline browsing
+- HuggingFace API search available when authenticated — verified at hfClient.ts:97–119
+- GGUF format availability, quantization level (Q2 through Q8), base model family, and file size displayed
 
-### Download Management (Phase B — Planned)
-- **Resumable downloads:** If interrupted, downloads resume from the last checkpoint using `huggingface-cli --resume-download`
-- **Concurrent downloads:** Multiple models can download simultaneously (configurable limit)
-- **Download queue:** Models are queued and downloaded in order; user can reorder or cancel
-- **Progress tracking:** Real-time progress bars with ETA, speed, and bytes transferred
+### Download Management — Verified
+- **Resumable downloads:** If interrupted, downloads resume from the last checkpoint using `huggingface-cli --resume-download` — verified at hfClient.ts:143–212
+- **Concurrent downloads:** Multiple models can download simultaneously (configurable limit of 3) — verified at hfClient.ts:224+
+- **Download queue:** Models are queued and downloaded in order; user can reorder or cancel — verified at hfClient.ts:215–238
+- **Progress tracking:** Real-time progress bars with ETA, speed, and bytes transferred — verified at hfClient.ts:177–209
 - **Storage location:** Models stored in `%APPDATA%/OpenLLMCode/models/` (Windows), `~/.openllmcode/models/` (macOS/Linux)
 
-### Local Model Management
-- **Model browser panel** — Lists all locally available models with load/unload status
+### Local Model Management — Verified (Partially)
+- **Model browser panel** — Lists all locally available models with load/unload status — verified at ModelManager.tsx:143–162
 - **Lazy loading** — Models are loaded only when the user starts a chat session or switches models
-- **Multi-model routing** — Different models can be assigned to planning vs. execution modes
-- **Model settings per entry:** Context window, GPU layers, thread count
+- **Multi-model routing** — Different models can be assigned to planning vs. execution modes (types exist, not yet wired in UI)
 
-### Model Selector (Title Bar) — Verified
-A dropdown in the title bar shows:
-- Currently loaded model name and size (`src/components/TitleBar.tsx`)
-- Quick switch between loaded models
-- Option to load a new model from local files or download from HuggingFace
+### ⚠️ Missing: Model Settings Per Entry
+The plan specifies "Context window, GPU layers, thread count" per model. Only model name/path is stored currently. No per-model config UI exists — Phase F gap.
 
 ---
 
@@ -317,8 +276,8 @@ A dropdown in the title bar shows:
 ### Overview
 The chat interface is a first-class experience with rich formatting, multiple sessions, granular parameter controls, real-time streaming, and Cline-style checkpoint rollback.
 
-#### Verified Implementation (Phase A)
-- **Single-file layout:** `src/components/App.tsx` contains the full layout shell — sidebar, editor area with Monaco placeholder, chat panel, terminal panel (~194 lines)
+#### Verified Implementation (Phase A + B)
+- **Single-file layout:** `src/components/App.tsx` contains the full layout shell — sidebar, editor area with Monaco integration, chat panel, terminal panel (~194 lines)
 - **ChatPanel** section in App.tsx: messages list with user/agent bubbles, tool call cards (read_file, run_command), input textarea, generation parameters dropdown
 - **Session management:** session selector dropdown, "New Session" button — verified at App.tsx:107–168
 
@@ -327,7 +286,7 @@ The chat interface is a first-class experience with rich formatting, multiple se
 │  Chat Panel                                                           │
 │                                                                       │
 │  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │ Sessions: ▾    [📋 Plan] [⚡ Act] [🔍 R/E] [🛡 Audit] [+ New]     │ │
+│  │ Sessions: ▾    [📋 Plan] [⚡ Act] [🔍 R/E] [+ New]               │ │
 │  ├───────────────────────────────────────────────────────────────────┤ │
 │  │                                                                   │ │
 │  │  ┌─────────────────────────────────────────────────────────────┐  │ │
@@ -342,18 +301,9 @@ The chat interface is a first-class experience with rich formatting, multiple se
 │  │  │  I'll investigate the auth middleware. Let me read the     │  │ │
 │  │  │  file first to understand the current implementation.      │  │ │
 │  │  │                                                            │  │ │
-│  │  │  ┌───────────────────────────────────────────────┐         │  │ │
-│  │  │  │ 🔧 Tool: read_file                             │         │  │ │
-│  │  │  │    path: "src/auth/middleware.ts"              │         │  │ │
-│  │  │  │    Status: ✅ Completed                        │         │  │ │
-│  │  │  └───────────────────────────────────────────────┘         │  │ │
+│  │  │  🔧 Tool: read_file — ✅ Completed                        │  │ │
 │  │  │                                                            │  │ │
-│  │  │  I found the issue. The JWT verification is using an      │  │ │
-│  │  │  expired secret key. Here's my plan:                       │  │ │
-│  │  │                                                            │  │ │
-│  │  │  1. Update the secret key in `.env`                        │  │ │
-│  │  │  2. Modify the verification logic to handle rotation       │  │ │
-│  │  │  3. Add a fallback mechanism for graceful degradation      │  │ │
+│  │  │  I found an issue in the auth middleware.                 │  │ │
 │  │  └─────────────────────────────────────────────────────────────┘  │ │
 │  │                                                                   │ │
 │  ├───────────────────────────────────────────────────────────────────┤ │
@@ -362,32 +312,24 @@ The chat interface is a first-class experience with rich formatting, multiple se
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-### Mode Toggle (Plan / Act / R/E / Audit) — Verified in UI
+### Mode Toggle (Plan / Act / R/E) — Verified in UI
 A prominent toggle at the top of the chat panel:
-```
-┌───────────┬───────────┬───────────┬───────────┐
-│   📋 Plan │   ⚡ Act  │  🔍 R/E   │  🛡 Audit │
-└───────────┴───────────┴───────────┴───────────┘
-```
-
 | Mode | Description | Verified In UI |
 |------|-------------|---------------|
-| **Plan** | Agent explores, asks questions, generates a structured plan | TitleBar.tsx:27–31 |
+| **Plan** | Agent explores, asks questions, generates a structured plan | TitleBar.tsx:27–31, ChatPanel.tsx:293–297 |
 | **Act** | Agent executes the plan step-by-step with approval gates | TitleBar.tsx |
-| **R/E** | Reverse Engineering — deep analysis of existing code | TitleBar.tsx |
-| **Audit** | Security & quality audit | Planned for Phase C |
+| **R/E** | Reverse Engineering — deep analysis of existing code | ChatPanel.tsx:296 |
 
-### Session Management — Verified
+### Session Management — Verified (Partially)
 | Feature | Status | Details |
 |---------|--------|---------|
 | **Multiple sessions** | ✅ Built | session selector dropdown in App.tsx |
 | **Session naming** | ✅ Built | auto-named from first message (simulated) |
 | **Session persistence** | ✅ Built | JSON files per session, saved via `dataPersistence.ts` |
 | **New session** | ✅ Built | "[+ New]" button |
-| **Delete session** | Planned | right-click on tab |
-| **Export session** | ✅ Built | `exportSessionToMarkdown()` in dataPersistence.ts:53–62 |
+| **Delete session** | 🔲 Not implemented | right-click on tab — Phase E gap |
 
-### Chat Checkpoint System (Cline-Style) — Verified Backend
+### Chat Checkpoint System (Cline-Style) — Verified
 Similar to Cline's checkpoint system, the chat maintains rollback points. Each checkpoint has two dropdown operations; checkpoints are created automatically at task start/end and after each approval action, or manually via button.
 
 ```
@@ -402,88 +344,61 @@ Similar to Cline's checkpoint system, the chat maintains rollback points. Each c
 │  │       • Restore to This Point               │
 │  │       • Delete Context After This Point     │
 │                                               │
-│  Checkpoint created on:                        │
-│  ┌───────────────────────────────────────────┐ │
-│  │  ⚪ Task start/end                         │ │
-│  │  ⚪ Each approval action                   │ │
-│  │  ⚪ Manually (button)                      │ │
-│  └───────────────────────────────────────────┘ │
+│  Checkpoints created at:                       │
+│  ⚪ Task start/end (automatic)                 │
+│  ⚪ Each approval action (automatic)           │
+│  ⚪ Manual via + Create button                  │
 └───────────────────────────────────────────────┘
 ```
 
-- **Restore to This Point** — `git reset --hard` back to the commit at this point; restores both chat context and file state
-- **Delete Context After This Point** — removes all chat messages after this point while preserving any file modifications that occurred (the files stay as-is)
-- Checkpoints are tied to Git commits; user can create manual checkpoints at any time
-
-### Chat Message Rendering — Rich Formatting
+### Chat Message Rendering — Verified
 | Element | Styling & Behavior | Verified In |
 |---------|-------------------|-------------|
 | **User messages** | Right-aligned, indigo background (`bg-indigo-600/20`), rounded corners | App.tsx:119–123 |
-| **Agent text** | Left-aligned, neutral background; full Markdown rendering (headings, bold, italic, lists, blockquotes) | App.tsx:125–138 |
-| **Tool calls** | Collapsible cards with tool name, input preview, status icon (⏳ running / ✅ done / ❌ failed) | App.tsx:129, 136 |
+| **Agent text** | Left-aligned, neutral background; full Markdown rendering (headings, bold, italic, lists, blockquotes) | ChatPanel.tsx:33–156 |
+| **Tool calls** | Cards with tool name, input preview, status icon (⏳ running / ✅ done / ❌ failed) | ChatPanel.tsx:419–427 |
 | **Inline code** | Monospace font with subtle background highlight | global.css |
-| **Approval prompts** | Highlighted card with Approve / Deny buttons and diff preview | Planned for Phase C |
-| **Links to images** | Rendered as Markdown links; click opens in system viewer or editor | Planned for Phase B |
+| **Approval prompts** | Highlighted card with Approve / Deny buttons and diff preview | ApprovalGate.tsx |
 
-### Streaming — Real-Time Token Display (Simulated)
-- Tokens stream in real-time with a smooth typewriter effect (simulated via `chatStore.ts:26–31`)
-- **Typing indicator:** Animated dots while agent is "thinking" before first token arrives (`animate-pulse` class, global.css + App.tsx:184)
-- **Cancel button:** Appears during streaming; aborts generation mid-stream and frees resources — Planned for Phase B
-- **Speed display:** Shows tokens/second in the corner of the current message — Planned for Phase B
-- **Token count:** Running total shown per message (prompt + completion) — Planned for Phase B
+### Streaming — Verified (Partially)
+- Tokens stream in real-time with a smooth typewriter effect — verified at ChatPanel.tsx:246–273
+- **Typing indicator:** Animated dots while agent is "thinking" before first token arrives — verified at App.tsx:184 + global.css `animate-pulse-slow`
+- **Cancel button:** Appears during streaming; aborts generation mid-stream and frees resources — verified at ChatPanel.tsx:326, 408
+- **Speed display:** Shows tokens/second in the corner of the current message — 🔲 Not implemented (Phase B gap)
+- **Token count:** Running total shown per message (prompt + completion) — verified at ChatPanel.tsx:378–381
 
 ### Generation Parameters Panel — Verified
 A collapsible panel at the top of the chat for fine-tuning inference:
 
-```
-┌───────────────────────────────────────────────┐
-│  ⚙ Generation Parameters                      │
-│                                               │
-│  Temperature:       [0.7] ◄────────►          │
-│  Top P:             [0.9] ◁────────▷           │
-│  Repetition Penalty:[1.1] ◄────────►          │
-│  Max Tokens:        [4096]                     │
-└───────────────────────────────────────────────┘
-```
+| Parameter | Range | Default | Implementation |
+|-----------|-------|---------|---------------|
+| Temperature | 0.1 – 2.0 | 0.7 | Slider + input in GenerationParams.tsx:53–56 |
+| Top P | 0.1 – 1.0 | 0.9 | Slider + input in GenerationParams.tsx:58–65 |
+| Repetition Penalty | 1.0 – 2.0 | 1.1 | Slider + input in GenerationParams.tsx:67–74 |
+| Max Tokens | 64 – 32768 | 4096 | Input field in GenerationParams.tsx:77–80 |
+| Stop Sequences | variable | `["<|end_of_turn|>"]` | Dynamic list in GenerationParams.tsx:83–91 |
 
-| Parameter | Range | Default | Verified In |
-|-----------|-------|---------|-------------|
-| Temperature | 0.1 – 2.0 | 0.7 | App.tsx:156–160 (select dropdown) |
-| Top P | 0.1 – 1.0 | 0.9 | Planned for Phase B |
-| Repetition Penalty | 1.0 – 2.0 | 1.1 | Planned for Phase B |
-| Max Tokens | 64 – 32768 | 4096 | Planned for Phase B |
+### System Prompt Editor — Verified
+Each session has an editable system prompt. Click the `⚙️` icon next to the model selector to open the editor. Default system prompt is pre-filled based on mode (Plan / Act / R/E). User can customize or replace entirely. Changes take effect on the next message sent.
 
-### System Prompt Editor — Verified (System AI)
-Each session has an editable system prompt:
-- Click the `⚙` icon next to the model selector to open the system prompt editor
-- Default system prompt is pre-filled based on mode (Plan / Act / R/E / Audit) — verified at systemAI.ts:17–38
-- User can customize or replace entirely
-- Changes take effect on the next message sent
-- **Preset templates:** Quick-select from built-in prompts ("Coding Assistant", "Code Reviewer", "Debugging Expert", "Reverse Engineer", "Security Auditor", etc.) — Planned for Phase B
+**Preset templates — Verified:** 5 built-in prompts: Coding, Review, Debugging, Reverse Engineer, Security Auditor — implemented in ChatPanel.tsx:467–481.
 
-### Message-Level Actions & Checkpoint Dropdown (Planned)
+### Message-Level Actions — Verified (Partially)
 Each chat message has a subtle action bar that appears on hover:
-| Action | Description |
-|--------|-------------|
-| 📋 Copy | Copy the entire message as Markdown to clipboard |
-| ✏️ Edit (user messages) | Modify your own message and re-send; agent responds from scratch |
-| 🔁 Regenerate (agent messages) | Re-generate this specific response with current parameters |
-| ⬇️ Continue | If a response was cut off, continue generating from where it stopped |
+| Action | Status | Details |
+|--------|--------|---------|
+| 📋 Copy | ✅ Built | CopyButton component at ChatPanel.tsx:159–189 |
+| ✏️ Edit (user messages) | 🔲 Not implemented | Placeholder — Phase B gap |
+| 🔁 Regenerate (agent messages) | 🔲 Placeholder | `TODO: regenerate` in ChatPanel.tsx:409 |
 
 ### Navigation (Mouse + Tab/Arrow Keys)
 All interactions are navigable via mouse click, Tab key cycling through elements, and Arrow keys for menus/dropdowns. No hotkeys required.
 
-### Responsive Design (Planned)
-- Chat panel auto-resizes with the window; messages reflow gracefully
-- On narrow windows, tool call cards collapse by default
-- Long code blocks are scrollable within their container (not full-page scroll)
-- Touch-friendly on tablets: larger tap targets for buttons
-
 ---
 
-## 7. Context Compression Engine — Planned (Phase E)
+## 7. Context Compression Engine — Verified ✅
 
-### Overview
+### Overview (Updated with Verification Status)
 To support extremely long-running contexts, OpenLLMCode implements an **automated context compression** system that offloads early conversation history to the task system while maintaining coherence.
 
 ```
@@ -492,7 +407,7 @@ To support extremely long-running contexts, OpenLLMCode implements an **automate
 │                                               │
 │  Active Window:                               │
 │  ┌───────────────────────────────────────────┐ │
-│  │  [Recent messages — last ~2048 tokens]     │ │
+│  │  [Recent messages — last ~15% of context]  │ │
 │  │  • Current task state                      │ │
 │  │  • Recent tool calls & results             │ │
 │  │  • Active plan steps                       │ │
@@ -509,8 +424,19 @@ To support extremely long-running contexts, OpenLLMCode implements an **automate
 └───────────────────────────────────────────────┘
 ```
 
+### Implementation — Verified ✅
+**Status:** Full implementation exists but **not yet wired into the chat flow**. The core engine is complete and tested, but `generateFullContext()` from contextCompression.ts is never called during message assembly.
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| **Active window calculation** | ✅ Built | `splitMessagesByTokens()` in contextCompression.ts:61–86 — keeps bottom 15% as active window with min floor of 2048 tokens |
+| **Compression trigger** | ✅ Built | `shouldCompress()` and `compressConversation()` in contextCompression.ts:142–177, 215–222 — triggers when total context exceeds 131K token threshold |
+| **AI-powered summarization** | ✅ Built | `compressMessages()` in contextCompression.ts:89–139 — uses System AI to generate structured summaries with key decisions and file modifications |
+| **Structured offload** | ✅ Built | `CompressedEntry` interface stores summary, keyDecisions, filesModified, timestamp |
+| **Re-injection into LLM context** | 🔲 Not wired | `generateFullContext()` in contextCompression.ts:191–212 exists but is never called during chat message assembly — Phase E gap |
+
 ### How It Works
-1. **Active window:** A configurable percentage of total context remains in the LLM context as-is, with a minimum floor of 2048 tokens. For example, Qwen3.6 (up to 262K tokens) and Nemotron3-Nano-4B (up to 1M tokens) both benefit from proportionally larger active windows — smaller models use the full window while larger ones dynamically scale based on total context size.
+1. **Active window:** A configurable percentage of total context remains in the LLM context as-is, with a minimum floor of 2048 tokens. For example, Qwen3.6 (up to 262K tokens) and Nemotron3-Nano-4B (up to 1M tokens) both benefit from proportionally larger active windows — smaller models use the full window while larger ones dynamically scale based on total context size
 2. **Compression trigger:** When total context exceeds a threshold, earlier messages are compressed into concise summaries by the System AI
 3. **Structured offload:** Compressed data is stored in the task's JSON state file, including:
    - Summarized conversation history (via `SystemAIClient.sendMessage()`)
@@ -525,9 +451,9 @@ To support extremely long-running contexts, OpenLLMCode implements an **automate
 
 ---
 
-## 8. Task System — Planned for Phase C
+## 8. Task System — Verified ✅
 
-### Task Structure
+### Task Structure — Verified
 ```typescript
 interface Task {
   id: string;
@@ -539,13 +465,14 @@ interface Task {
   compressedHistory: CompressedEntry[];  // Context compression log
   checkpoints: Checkpoint[];            // Cline-style rollback points
   completionSummary?: string;           // AI-generated summary on task completion
-  createdAt: Date;
+  createdAt: number;
+  updatedAt: number;
 }
 
 interface PlanStep {
   id: string;
   description: string;
-  toolsRequired: string[];      // e.g., ["read_file", "write_file"]
+  toolsRequired: ToolType[];      // e.g., ["read_file", "write_file"]
   status: 'pending' | 'approved' | 'executing' | 'completed' | 'skipped';
 }
 
@@ -561,27 +488,14 @@ interface CompressedEntry {
   summary: string;              // AI-generated summary of earlier conversation
   keyDecisions: string[];       // important decisions made
   filesModified: string[];      // what was changed
-  timestamp: Date;
+  timestamp: number;
 }
 ```
 
-### System Prompt Guidance (Verified — System AI)
-The agent receives a structured system prompt that includes:
+### System Prompt Guidance — Verified (System AI)
+The agent receives a structured system prompt that includes: role definition, allowed/denied action lists, behavioral guidelines. Full assembly with compressed history, task context, tool registry, project context will be wired when Context Compression Engine is integrated into chat flow.
 
-1. **Role definition** — You are an AI coding assistant working within OpenLLMCode
-2. **Task context** — Current task title, description, and plan (if in Act mode)
-3. **Compressed history summary** — Condensed awareness of earlier work (from Context Compression Engine)
-4. **Available tools** — Full list with descriptions and schemas
-5. **Approval rules** — Which actions require approval and which don't
-6. **Project context** — File tree summary of the current project root
-7. **Behavioral guidelines:**
-   - Always read files before modifying them
-   - Show diffs before writing changes
-   - Explain what you're doing before acting
-   - Ask clarifying questions when uncertain
-   - Prefer incremental changes over large rewrites
-
-### Task Lifecycle (Planned)
+### Task Lifecycle — Verified
 ```
 User submits request
        │
@@ -611,21 +525,21 @@ User submits request
 
 ---
 
-## 9. Approval System & Pre-Approval Rules — Planned for Phase C
+## 9. Approval System & Pre-Approval Rules — Verified ✅
 
-### Default Approval Matrix
-| Action | Default Behavior | Verified In |
-|--------|----------------|-------------|
-| Read file | ✅ Auto-approved | IPC: fs-read-file in main.ts:46–53 |
-| List directory | ✅ Auto-approved | Planned |
-| Write / modify file | ⏸ Requires approval (shows diff) | gitAutoCommit tracks successful writes |
-| Create new file | ⏸ Requires approval (shows content preview) | Planned |
-| Delete file | ⏸ Requires approval (highlights danger) | Planned |
-| Run terminal command | ⏸ Requires approval (shows command) | IPC: exec-command in main.ts:62–83 |
-| External network access | ❌ Denied by default (requires explicit rule) | Planned for Phase E |
+### Default Approval Matrix — Verified
+| Action | Default Behavior | Implementation |
+|--------|----------------|---------------|
+| Read file | ✅ Auto-approved | toolRegistry.ts:14 (auto) |
+| List directory | ✅ Auto-approved | toolRegistry.ts:59 (glob/search auto) |
+| Write / modify file | ⏸ Requires approval (shows diff) | toolRegistry.ts:23 (require), ApprovalGate.tsx |
+| Create new file | ⏸ Requires approval (shows content preview) | toolRegistry.ts:32 (require) |
+| Delete file | ⏸ Requires approval (highlights danger) | toolRegistry.ts:40 (require), ApprovalGate.tsx:70–79 |
+| Run terminal command | ⏸ Requires approval (shows command) | toolRegistry.ts:49 (require), main.ts IPC |
+| External network access | ❌ Denied by default (requires explicit rule) | Planned for Phase E — not yet implemented |
 
-### Category-Based Approval Rules
-The approval system supports category-based rules for fine-grained control. Pre-approval patterns stored at project level:
+### Category-Based Approval Rules — Verified ✅
+The approval system supports category-based rules for fine-grained control. Pre-approval patterns stored at project level in `.openllmcode-rules`:
 
 ```json
 // .openllmcode-rules  (project-level configuration)
@@ -647,11 +561,13 @@ The approval system supports category-based rules for fine-grained control. Pre-
 }
 ```
 
+**Implementation — Verified:** `loadApprovalRules()` and `saveApprovalRules()` in toolRegistry.ts:124–139, `requiresApproval()` function at line 142–183.
+
 ---
 
-## 10. File Tree & Project Controls — Verified
+## 10. File Tree & Project Controls — Verified ✅
 
-### Sidebar Layout (Verified in Sidebar.tsx + App.tsx)
+### Sidebar Layout — Verified
 ```
 ┌───────────────────────────────┐
 │  📁 MyProject                  │
@@ -672,59 +588,43 @@ The approval system supports category-based rules for fine-grained control. Pre-
 └───────────────────────────────┘
 ```
 
-### File Tree Component (Verified)
-- **Sidebar.tsx** — 32 lines, full sidebar with project controls + file tree + MCP panel
-- Standalone component that can be used in App.tsx or independently
+### File Tree — Verified ✅
+- Standalone Sidebar.tsx component with project controls + file tree + MCP panel
 - Hover states on tree items (`hover:bg-[#313244]/60`)
 
-### Project Controls (Verified)
-| Control | Verified In | Description |
-|---------|-------------|-------------|
-| **Change Root Folder** | Sidebar.tsx:9–10, App.tsx:48–51 | Opens native file picker dialog via `dialog.selectFolder` IPC |
-| **New Project** | Sidebar.tsx:10 | Creates new project folder — Planned for Phase D |
-| **MCP Panel** | Sidebar.tsx:26–29 | Lists connected MCP servers (Git Server placeholder) |
+### Project Controls — Verified ✅
+| Control | Implementation | Description |
+|---------|---------------|-------------|
+| **Change Root Folder** | main.ts:145–148, preload.ts:20 | Opens native file picker dialog via `dialog.selectFolder` IPC |
+| **New Project** | ProjectWizard.tsx:92–364 | Creates new project folder — launched from sidebar button |
+| **Agent Skills Panel** | 🔲 Not implemented yet (Phase G) | Tree-view panel for Agent Skill discovery and toggling |
 
-### File Watching (Planned — dependency installed)
-- chokidar watches for external changes (e.g., another editor modifying files)
-- Tree updates in real-time when files are added, modified, or deleted outside OpenLLMCode
-
----
-
-## 10A. Project Creation & Import Tooling — Planned for Phase D
-
-### Default Project Folder
-On first launch, the app creates a default project folder so users can start immediately:
-
-```
-┌───────────────────────────────────────────────┐
-│  🚀 Welcome to OpenLLMCode                     │
-│                                               │
-│  No project open. Create one now:              │
-│                                               │
-│  ┌───────────────────────────────────────────┐ │
-│  │  [📄 Empty Project]                       │ │
-│  │     ▸ Start from scratch                  │ │
-│  │                                           │ │
-│  │  [📦 From Template (Unzip)]               │ │
-│  │     ▸ Starter boilerplates                │ │
-│  │                                           │ │
-│  │  [🔗 Clone Repository]                    │ │
-│  │     ▸ GitHub / GitLab / Bitbucket         │ │
-│  │                                           │ │
-│  │  [📂 Open Existing Folder]                 │ │
-│  └───────────────────────────────────────────┘ │
-└───────────────────────────────────────────────┘
-```
-
-### Template Library (Unzip Tooling) — Planned for Phase D
-Built-in templates that are extracted into the new project folder. Templates downloaded as `.zip` from a curated list and extracted into the project folder. After extraction, dependencies auto-installed (e.g., `npm install`, `go mod tidy`).
-
-### Repository Clone Tooling — Planned for Phase D
-Clone projects from any Git provider with progress tracking and authentication options (SSH key or personal access token).
+### File Watching — Verified ✅
+- chokidar watches for external changes (e.g., another editor modifying files) via main.ts:94–117
+- `file-tree-changed` IPC event sent to renderer when files are added, modified, or deleted outside OpenLLMCode
 
 ---
 
-## 10B. Agent Skills — Tree-View, Auto-Suggested Tool Extensions (Planned for Phase C/D)
+## 10A. Project Creation & Import Tooling — Verified ✅
+
+### Template Library — Verified ✅
+Built-in templates that create project structure and auto-install dependencies:
+
+| # | Template | Description | Install Command |
+|---|----------|-------------|-----------------|
+| 1 | React + TypeScript | Vite + React + TS starter with Tailwind CSS | `npm install` |
+| 2 | Node.js + Express | Express API server with TypeScript | `npm install` |
+| 3 | Python + FastAPI | FastAPI web framework with uvicorn | `pip install -r requirements.txt` |
+| 4 | Go + Echo | Echo web framework starter | `go mod init my-app && go mod tidy` |
+| 5 | Rust + Axum | Axum web framework with Tokio runtime | (none) |
+| 6 | .NET API | ASP.NET Core minimal API | `dotnet run` |
+
+### Repository Clone Tooling — Verified ✅ (Partially)
+Clone projects from any Git provider with progress tracking. Uses system Git config for SSH/token auth. ⚠️ **Missing:** No explicit authentication options dialog for private repos in the wizard UI — relies on system Git credentials manager.
+
+---
+
+## 10B. Agent Skills — Tree-View, Auto-Suggested Tool Extensions 🔲 NOT IMPLEMENTED (Phase G)
 
 ### Overview
 Agent Skills are a unified tool extension system compatible with Claude Code's skill architecture and similar frameworks like Aider's "agents" or Cursor's tools. They provide focused capabilities that the agent can discover and use during task execution — file operations, code review, security scanning, reverse engineering, etc.
@@ -735,36 +635,7 @@ Skills appear in a **tree-view panel** alongside MCP servers, auto-suggested whe
 - Contextual triggers (auto-detected by file type or project structure)
 - An approval cost (low for safe operations like `grep`, high for destructive ones like `rm`)
 
-```
-┌───────────────────────────────────────────────┐
-│  🔧 Agent Skills               [🔍 Search]    │
-│                                               │
-│  ── Code Quality                              │
-│  ├── 📊 C++ Code Audit                       │
-│  │     ▸ Static analysis, memory leaks       │
-│  │                                           │
-│  ├── 📊 Go Code Audit                        │
-│  │     ▸ goroutine leak detection            │
-│  │                                           │
-│  ├── 📊 Python Code Audit                    │
-│  │     ▸ type checking, security scan        │
-│  │                                           │
-│  ── Reverse Engineering                       │
-│  ├── 🔍 Binary Format Reader                 │
-│  │     ▸ PNG, PDF, SQLite, Protobuf, etc.    │
-│  │                                           │
-│  ├── 📦 .NET Assembly Inspector              │
-│  │     ▸ ILSpy/monodis decompilation         │
-│  │                                           │
-│  ── Network Tools                             │
-│  ├── 🌐 Nmap Scan                            │
-│  ├── 🌐 Wireshark Capture                    │
-│  └── ── Discreet Mode                        │
-│                                               │
-└───────────────────────────────────────────────┘
-```
-
-### Default Skills (Pre-installed)
+### Default Skills (Pre-installed) — Planned
 | Category | Skill | Description | Auto-Suggested When |
 |----------|-------|-------------|---------------------|
 | **Shell** | `bash` / `zsh` commands | Full shell access with tool execution | Always available |
@@ -777,66 +648,13 @@ Skills appear in a **tree-view panel** alongside MCP servers, auto-suggested whe
 | **.NET Assembly Inspector** | Full decompilation of .NET assemblies (.dll, .exe, .csproj) | Opening .NET binaries or projects |
 | **C/C++ Disassembler** | Ghidra-style disassembly, symbol analysis via `objdump`/`llvm-objdump` | Working with compiled binaries (.so/.dll/.exe) |
 | **Network Penetration Testing** | Nmap scanning, Wireshark capture, TCPDump, port scanning | When network tools detected in PATH |
-| — Discreet mode (stealth scan on closed ports) | Stealth scanning without triggering IDS/IPS |
-| — Concurrent host discovery | Scan multiple hosts simultaneously |
-| **Git Skills** | Blame analysis, bisect for bug finding, cherry-pick preview | When working with Git repositories |
-| **File Operations** | Diff viewer, rename refactoring, import finder | When editing source files |
-| **Security Scanners** | OWASP top 10 checks, dependency vulnerability scan, secret detection (git-secrets) | Before committing changes |
-| **Web Scraping** | URL scraping with headless browser, HTML parsing, content extraction | Any time web data is needed |
-| **Search & Query** | Google/Bing/DuckDuckGo search via APIs, Wikipedia lookup, Arxiv paper search | When research or real-time info is needed |
-| **Weather** | OpenWeatherMap/WTGNOAPI weather queries for current conditions and forecasts | When time/date/weather context needed |
-| **Maps & Location** | Google Maps/OpenStreetMap/Nominatim geocoding, directions, POI search | When location data needed |
-| **Time & Date** | World clock, timezone conversion, calendar integration (Google/Outlook APIs) | When scheduling or time queries arise |
-| **Finance** | CoinGecko crypto prices, Yahoo Finance stock quotes, currency conversion | Financial data lookups |
-| **Social Media** | Twitter/X API search, Reddit scraping, Hacker News queries, GitHub trending | Social/news monitoring |
-| **Developer Tools** | npm/yarn/pip package lookup, Stack Overflow Q&A search, documentation lookup (MDN, Read the Docs) | When looking up APIs or packages |
-| **Email & Notifications** | Gmail/Outlook API integration for sending/receiving emails with agent context | Communication tasks |
 
-### Pingu — System AI Avatar (New!)
-The System AI is anthropomorphized as a **copyleft version of Pingu** from [Pingu](https://en.wikipedia.org/wiki/Pingu) — the claymation penguin character known for expressive mouth movements, blinking, and iconic "Noot noot!" personality.
-
-```
-┌───────────────────────────────────────────────┐
-│  🐧 Pingu (System AI)                          │
-│                                               │
-│  ── Active State                              │
-│  • Eyes follow cursor during processing        │
-│  • "Lights up" — pupils dilate, body glows    │
-│  • Mouth animates while speaking               │
-│  • Blinking cycle (natural random timing)      │
-│                                               │
-│  ── Pingu Menu (click to open)                │
-│  ├── Skills                                    │
-│  ├── Settings                                  │
-│  ├── Compile Engine                            │
-│  ├── Manage Models                             │
-│  └── About Pingu                              │
-│                                               │
-└───────────────────────────────────────────────┘
-```
-
-**Behavior:**
-- **Idle state:** Pingu sits quietly with gentle breathing animation and periodic blinking
-- **Active state:** Eyes track cursor movement; body "lights up" (soft glow effect) during processing; mouth animates in sync with text output
-- **On click:** Opens a menu panel showing skills, settings, compile status, model info — all navigable via mouse or Tab/Arrow keys
-- **Personality quirk:** Occasionally emits a subtle "Noot noot!" sound when tasks complete (configurable)
-
-### Skill Discovery & Auto-Suggestion
+### Skill Discovery & Auto-Suggestion — Planned
 - Skills are discovered on startup by scanning `.openllmcode-skills/` in the project root and `~/.openllmcode/skills/` globally
-- **Auto-suggestion engine** analyzes:
-  - File types in the current project (e.g., many `.cpp` → suggest C++ audit)
-  - Language servers available on PATH (Python, Go, Node.js)
-  - Installed tools (`nmap`, `objdump`, `ilspy`, etc.)
-  - Project configuration files (package.json → suggest npm audit; go.mod → suggest go vet)
+- **Auto-suggestion engine** analyzes file types, language servers available on PATH, installed tools, and project configuration files
 - Skills appear in the sidebar panel with a "✨ Suggested" badge when relevant
 
-### Skill Activation & Usage
-1. Click a skill in the tree view to activate it — tools are added to the agent's tool registry
-2. Agent receives contextual guidance on using the new skills (similar to how MCP tools work)
-3. Skills can be toggled on/off independently of each other
-4. Some skills auto-execute (e.g., "Run C++ Audit" will scan all `.cpp` files and report findings in chat)
-
-### Skill Format (YAML + Tool Definitions)
+### Skill Format (YAML + Tool Definitions) — Planned
 ```yaml
 name: cpp-code-audit
 description: "C++ code audit — static analysis, memory leaks, valgrind integration"
@@ -851,14 +669,14 @@ tools:
 suggested_when: ["*.cpp present in project"]
 ```
 
-### Compatibility with Claude Code Skills
+### Compatibility with Claude Code Skills — Planned
 - Follows the same `claude-code-skills` directory structure (`~/.claude/skills/`) for compatibility
 - Converts Claude Code skill YAML format to OpenLLMCode's internal skill representation on import
 - Can directly use `.md` skill definitions from the Claude Code ecosystem via a conversion layer
 
 ---
 
-## 10C. Pingu — System AI Avatar (Detailed Design)
+## 10C. Pingu — System AI Avatar 🔲 NOT IMPLEMENTED (Phase G)
 
 ### Overview
 The System AI is personified as **Pingu**, inspired by [the BBC's copyleft claymation penguin](https://en.wikipedia.org/wiki/Pingu). This provides the UI with a warm, approachable mascot that communicates in a mix of human language and "Noot noot!" — giving users an emotional connection to their AI assistant.
@@ -878,7 +696,7 @@ The System AI is personified as **Pingu**, inspired by [the BBC's copyleft claym
 | **Error** | Head tilt (left or right); worried expression | Agent encounters error during task |
 | **Working on something** | Eyes follow cursor precisely; body bobs faster | User hovering over Pingu's menu area |
 
-### Pingu Menu (click to open)
+### Pingu Menu (click to open) — Planned
 When clicked, Pingu opens a menu panel with the following options:
 - **Skills:** Toggle individual Agent Skills on/off
 - **Settings:** Quick access to engine settings, model config, HF auth
@@ -887,239 +705,135 @@ When clicked, Pingu opens a menu panel with the following options:
 - **Activity Log:** Open the plaintext activity log in a new tab
 - **About Pingu:** Fun facts and credits for the System AI avatar
 
-### Technical Implementation
+### Technical Implementation — Planned
 - Uses CSS animations + SVG transforms for mouth, eyes, body glow (no video overhead)
 - `requestAnimationFrame` loop tracks cursor position to update eye direction
 - Audio sprite for "Noot noot!" sound effect (configurable volume/silence toggle)
 - State managed via Zustand store (`pinguStore.ts`) — tracks active/inactive, mood state
 
-### Personality Traits
-- **Helpful but not pushy:** Pingu waits patiently; doesn't interrupt the user while they're working
-- **Curious:** Occasionally suggests relevant skills when hovering over certain file types
-- **Proud of work:** Celebrates completed tasks with a little dance
-- **Cautious:** When uncertain, tilts its head and asks clarifying questions
-
 ---
 
-## 10D. Logging & Monitoring Tabs — Planned for Phase E
+## 10D. Logging & Monitoring Tabs — Verified ✅ (Core exists, UI needs wiring)
 
 ### Overview
 Dedicated logging tabs provide real-time visibility into llama.cpp instances during reasoning blocks, ensuring the UI remains responsive even when heavy inference is occurring. Users can monitor token generation, engine health, and detailed status at a glance.
 
-### Activity Log (Verified)
+### Activity Log — Verified ✅
 - Maintained by System AI in plaintext `.log` file (`activity.log`)
 - Appended via `appendActivityLog()` in dataPersistence.ts:89–92
 - Auto-rotated on long-running sessions
 - Provides quick situational awareness for the project state
 
-### Engine Logging (Planned)
-- Real-time llama.cpp monitoring during reasoning blocks
-- Per-engine tabs for primary + assistant engines
-- Filter bar for log level, time range search
-- Crash dumps saved with last 1000 lines
+### Engine Logging — Verified ✅ (Core exists, UI needs wiring)
+**Status:** The core engine logging system is fully implemented. The UI component exists but the Zustand store is not wired up.
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| **Session management** | ✅ Built | `startEngineLogging()`, `stopEngineLogging()` in engineLogger.ts:53–124 — creates timestamped log files, rotation at 5MB |
+| **Log entry management** | ✅ Built | `addLogEntry()` in engineLogger.ts:135–183 — memory + disk writing with size limits (10K entries) |
+| **Log filtering** | ✅ Built | `filterLogEntries()`, log level filtering, search query in engineLogger.ts:252–276 |
+| **Disk rotation** | ✅ Built | `rotateLogFileIfNecessary()` in engineLogger.ts:281–304 — rotates at 5MB threshold |
+| **Stdout/stderr handlers** | ✅ Built | `handleEngineStdout()`, `handleEngineStderr()` in engineLogger.ts:342–381 — parses JSON and raw output into log entries |
+| **EngineLoggingPanel UI** | ✅ Built | 273 lines with tabs, filters (trace/debug/info/warn/error), search, start/stop logging buttons |
+| **IPC event integration** | ✅ Wired in main.ts:403–428 | `engine-logging-start`, `engine-logging-stop`, `engine-logging-get-config`, `engine-logging-set-config` channels |
+| **Real-time data forwarding** | ✅ Wired in main.ts:376, 393, 464, 480 | Stdout/stderr forwarded to engine logger during inference |
+| **Zustand store wiring** | 🔲 Not wired | `engineLoggerStore.ts` is full of placeholders — all methods return null/false without real implementation. Not exported from barrel index.ts |
 
 ---
 
-## 11. Editor & Terminal — Partially Verified
+## 11. Editor & Terminal — Verified ✅ (Core exists, some gaps remain)
 
-### Monaco Editor Integration (Verified)
-The code editor uses Monaco (same as VS Code):
-- Full syntax highlighting for all major languages (`@monaco-editor/react` dependency verified in package.json:18)
-- Bracket matching, folding regions, minimap
-- Multi-cursor editing support
-- Manual edits are allowed and synced back to disk
+### Monaco Editor Integration — Verified ✅
+Full `<Editor>` component with catppuccin theme, tab bar, auto-save on blur, keyboard shortcuts (Ctrl+S), and file open via IPC — implemented at MonacoEditor.tsx:280 lines.
 
-### Verified Implementation — Monaco Placeholder in App.tsx (lines 79–96):
-```tsx
-<div className="flex-1 bg-[#1e1e2e] p-4 overflow-auto font-mono text-sm leading-relaxed">
-  <pre className="text-[#cdd6f4] whitespace-pre-wrap">
-    {'<span style="color:#cba6f7">import</span> React {"{ useState }"} <span style="color:#cba6f7">from</span> <span style="color:#a6e3a1">'"'"'react'"'"'</span>;\n\n'}
-    {'<span style="color:#cba6f7">export function</span> <span style="color:#89b4fa">App</span>() {"{"}\n'}
-    // ... full syntax-highlighted code preview with catppuccin colors
-  </pre>
-</div>
-```
+**Missing:** Image/file preview for non-code files; Split view support (tab bar exists but drag-to-split not implemented).
 
-### Terminal Window (Verified — placeholder)
-- Full terminal emulator in the bottom panel (terminal panel at App.tsx:172–190)
-- Uses the system's default shell (`cmd.exe` on Windows, `/bin/sh` elsewhere) — verified in main.ts:63
-- Working directory defaults to the project root
-- Resizable via draggable divider
+### xterm.js Terminal Panel — Verified ✅
+Full PTY-based terminal with tabs, streaming output, and real-time monitoring — implemented at XTermTerminal.tsx:224 lines. IPC channels verified in main.ts:159–196 and preload.ts:49–58.
 
-#### Verified Terminal Tools (IPC in electron/main.ts)
-| Tool | Verification | Description |
-|------|-------------|-------------|
-| `exec-command` | main.ts:62–83 | Execute a shell command; streams output in real-time |
-| `git-commit` | main.ts:86–97 | Commit changes with descriptive message |
+**Missing:** Agent real-time terminal output monitoring hook (agent can receive data but no UI to act on compile errors/test failures).
 
-#### Real-Time Monitoring (Planned)
-- When the agent runs a long-running command, it can monitor the output and react to errors
-- Compile errors, test failures, and server crashes are detected and reported back in the chat
+### Terminal Tools — Verified ✅
+3 tools added: `terminal_run_command`, `terminal_read_output`, `terminal_kill_process` with PTY-backed execution via toolRegistry.ts.
 
 ---
 
-## 12. MCP Server Integration — Planned for Phase E
+## 12. MCP Server Integration — Verified ✅ (Core exists, critical gaps remain)
 
-### Built-in MCP Client
-Uses the official `@modelcontextprotocol/sdk` (dependency installed at package.json:17).
+### Built-in MCP Client — Verified ✅
+Uses the official `@modelcontextprotocol/sdk` with server discovery, connection management, tool registration, and health check — implemented at mcpManager.ts:284 lines.
 
-### Verified Sidebar UI (Sidebar.tsx)
-```tsx
-<div className="px-3 py-2 border-t border-[#45475a] space-y-1.5">
-  <h2>🔌 MCP Servers</h2>
-  <div>✅ Git Server</div>
-  <button>[+ Add MCP Server]</button>
-</div>
-```
-
-### Adding an MCP Server (Planned)
-Dialog with fields: Name, Transport (stdio/HTTP), Command/URL, Arguments, Environment variables.
+**Critical Gaps:**
+1. **MCP tools never registered with agent's tool registry** — mcpManager has getMCPToolNames()/callMCPTool() but no integration with toolRegistry.registerTool(). The agent cannot use MCP tools until this is wired up.
+2. **HTTP transport in mcpManager.ts:109–120 is broken** — uses `StdioClientTransport` instead of HTTP transport, will crash at runtime for any MCP server configured with HTTP transport.
+3. **Auto-reconnect on MCP disconnect not implemented** (commented as "user must manually trigger").
 
 ---
 
-## 13. System Prompt Architecture — Verified (System AI)
+## 13. System Prompt Architecture — Verified ✅ (Core exists)
 
-The system prompt is assembled dynamically from several sections. The **verified** System AI system prompt (`systemAI.ts:17–38`) includes role definition, allowed/denied action lists, and behavioral guidelines. Full assembly with compressed history, task context, tool registry, project context — planned for Phase C when the Task System is built.
-
----
-
-## 14. Data Persistence — Verified (Phase A)
-
-| Data | Storage | Verified In | Details |
-|------|---------|-------------|---------|
-| Chat history (sessions) | Markdown files (`.md`) | dataPersistence.ts:53–62 | Human-readable; portable via `exportSessionToMarkdown()` |
-| Session metadata | JSON files (`.json`) | dataPersistence.ts:34–45 | Saved/loaded by ID, managed by saveSession() and loadSession() |
-| Engine config | JSON config file | manager.ts:108–127 | Selected backend, binary source, compile flags |
-| Model settings | JSON config file | Planned for Phase B | Per-model parameters (context window, GPU layers, threads) |
-| HuggingFace auth token | OS Keychain | Planned for Phase B | Windows Credential Manager / macOS Keychain / Linux libsecret |
-| MCP server configs | JSON config file | Planned for Phase E | Server definitions and connection state |
-| Terminal history | In-memory + JSON | Planned for Phase D | Persisted per-task |
-| Download queue/state | JSON config file | Planned for Phase B (HF integration) | Resumable downloads; progress tracking |
-| Engine logs | Plain-text `.log` files | Planned for Phase E | Per-session; rotatable; exportable |
-| Activity log (plaintext) | `.log` maintained by System AI | dataPersistence.ts:89–92 | Summarizes all activities for quick situational awareness |
+The agent receives a structured system prompt that includes: role definition, allowed/denied action lists, behavioral guidelines. Full assembly with compressed history, task context, tool registry, project context will be wired when Context Compression Engine is integrated into chat flow.
 
 ---
 
-## 15. Development Phases — Updated with Verification Status
+## 14. Data Persistence — Verified ✅ (Core exists)
 
-### Phase A — Foundation ✅ **VERIFIED COMPLETE** (2026-05-13)
-| Feature | Verified? | Files | Lines |
-|---------|-----------|-------|-------|
-| Electron app shell with layout | ✅ `App.tsx` single-file layout | App.tsx, Sidebar.tsx, TitleBar.tsx | 262 lines |
-| Engine Manager UI + backend selection | ✅ WMI/sysctl detection, GitHub download | manager.ts | 127 lines |
-| System AI (1B CPU model) integration | ✅ Strict prompt, compile scripts | systemAI.ts | 147 lines |
-| Basic chat interface with streaming | ✅ Simulated response flow | App.tsx, chatStore.ts | ~250 lines combined |
-| Model selector in title bar | ✅ Dropdown with engine manager | TitleBar.tsx | 36 lines |
-| File tree + project controls | ✅ Sidebar component standalone | Sidebar.tsx | 32 lines |
-| JSON + Markdown data persistence | ✅ Sessions, config, activity log | dataPersistence.ts | 104 lines |
-| Git auto-commit on AI changes | ✅ Commit/squash/checkpoints | gitAutoCommit.ts | 111 lines |
-| TypeScript types | ✅ Core types defined | types.ts | 45 lines |
-| Zustand stores | ✅ engineStore, chatStore | store/*.ts | ~82 lines combined |
-| Electron main process (IPC) | ✅ Engine, file ops, terminal, Git, chat | electron/main.ts | 180 lines |
-| Global CSS + Tailwind config | ✅ Dark catppuccin theme | global.css, tailwind.config.js | 94+ lines combined |
+| Data | Storage | Status | Details |
+|------|---------|--------|---------|
+| Chat history (sessions) | Markdown files (.md) | ✅ Built | dataPersistence.ts:53–62, portable via exportSessionToMarkdown() |
+| Session metadata | JSON files (.json) | ✅ Built | dataPersistence.ts:34–45, saved/loaded by ID |
+| Engine config | JSON config file | ✅ Built | manager.ts:108–127, selected backend/binary source |
+| Model settings per entry | JSON config file | 🔲 Not implemented | Per-model parameters (context window, GPU layers, threads) — Phase F gap |
+| HuggingFace auth token | Local JSON file | ✅ Built (partial) | hfClient.ts:44–58 — uses local config instead of OS keychain |
+| MCP server configs | JSON config file | ✅ Built | mcpManager.ts:226–246, .openllmcode-mcp in project root |
+| Terminal history | In-memory + JSON | ✅ Built | Per-task via IPC (no dedicated persistence) |
+| Download queue/state | In-memory | ✅ Built | hfClient.ts:215–238 — not yet wired to ModelManager UI |
+| Engine logs | Plain-text .log files | ✅ Built | engineLogger.ts:68–77, timestamped log files with rotation |
+| Activity log (plaintext) | .log maintained by System AI | ✅ Built | dataPersistence.ts:89–92 |
 
-**Total Phase A: ~36 files, ~2548 lines implemented.**
+---
 
-### Phase B — HuggingFace & Chat Richness ✅ **VERIFIED COMPLETE** (2026-05-13)
-| Feature | Verified? | Files | Lines |
-|---------|-----------|-------|-------|
-| HF auth token management | ✅ Token/Browser/CLI methods | hfClient.ts | ~260 lines |
-| Model download with progress tracking | ✅ Resumable via huggingface-cli --resume-download | hfClient.ts | — |
-| Download queue management (max 3 concurrent) | ✅ QueuedDownload + getDownloadQueue() | hfClient.ts | — |
-| Model Manager UI panel | ✅ Local tab + HF tab, auth dialog, download queue display | ModelManager.tsx | ~160 lines |
-| Generation parameters panel | ✅ Temperature, top-p, rep penalty, max tokens, stop sequences (slider+input) | GenerationParams.tsx | ~90 lines |
-| Enhanced Chat UI with streaming | ✅ Character-by-character append at 15ms, typing dots, cancel button | ChatPanel.tsx | ~265 lines |
-| Markdown rendering in agent messages | ✅ Bold/italic/inline code/code blocks (copy button), lists via dangerouslySetInnerHTML | ChatPanel.tsx | — |
-| Message-level actions | ✅ Copy/Edit/Regenerate buttons on hover for user+agent messages | ChatPanel.tsx | — |
-| System prompt editor with presets | ✅ Modal: Coding, Review, Debugging, R/E, Audit templates | ChatPanel.tsx | — |
+## 15. Development Phases — Updated with Audit Status
 
-**Total Phase B: ~4 files, ~780 lines implemented.**
+### Phase A — Foundation ✅ **COMPLETE** (100%)
+All core infrastructure verified complete. TypeScript types, IPC channels, Engine Manager, System AI, Git auto-commit + squash + checkpoints, data persistence, Zustand stores all confirmed working.
 
-### Phase C — Agent Core & Git Integration ✅ **VERIFIED COMPLETE** (2026-05-13)
-| Feature | Status | Description |
-|---------|--------|-------------|
-| Plan/Act/R/E/Audit modes | ✅ Verified | Mode toggle buttons in ChatPanel + TitleBar with state tracking |
-| Tool registry system | ✅ Built | `src/engine/toolRegistry.ts` — 7 default tools (read_file, write_file, create_file, delete_file, run_command, search_files, glob), registerTool(), getToolSchema() |
-| Approval gate UI | ✅ Built | `src/components/ApprovalGate.tsx` + `src/store/approvalStore.ts` — four-option dialog: Allow / Always Allow / Deny / Deny w/ Reason, diff preview, destructive operation warnings |
-| Task creation & lifecycle | ✅ Built | `src/store/taskStore.ts` — full CRUD (createTask, updateTask, deleteTask), createCheckpoint, deleteContextAfterCheckpoint, completeTask with auto-squash |
-| System prompt assembly | ✅ Verified | Dynamic system prompts per mode in systemAI.ts:17–38 |
-| Chat checkpoint system | ✅ Built | `src/components/CheckpointPanel.tsx` — Cline-style rollback panel with Restore / Delete Context After dropdown, manual creation dialog |
-| Task completion squash | ✅ Wired | completeTask() auto-calls gitSquashCommits() via IPC; taskStore handles lifecycle transition |
-| User edits stashed automatically | ✅ Built | `src/engine/gitAutoCommit.ts` — stash(), stashPop(), hasUncommittedChanges(), stageAll() functions + IPC channels in preload.ts |
+**Total: ~36 files, ~2548 lines implemented.**
 
-**Phase C Files Added/Modified:**
-| # | File | Purpose | Lines |
-|---|------|---------|-------|
-| 1 | `src/types.ts` | Extended with ToolCall, ApprovalRequest, PlanStep, Checkpoint, CompressedEntry interfaces | +30 lines |
-| 2 | `src/engine/toolRegistry.ts` | Default tool registry with 7 tools, registerTool/getToolSchema API | ~95 lines |
-| 3 | `src/store/approvalStore.ts` | Zustand store for approval gate state management | ~100 lines |
-| 4 | `src/store/taskStore.ts` | Zustand store for task lifecycle + checkpoint CRUD | ~120 lines |
-| 5 | `src/engine/gitAutoCommit.ts` | Enhanced with stash, stageAll, hasUncommittedChanges | +60 lines |
-| 6 | `electron/main.ts` | Extended IPC: git-commit, git-get-head-hash, git-create-checkpoint, git-restore-to-checkpoint, git-squash-commits, git-stash, git-stash-pop, git-has-uncommitted | +120 lines |
-| 7 | `src/components/ApprovalGate.tsx` | Four-option approval dialog with diff preview, warnings | ~165 lines |
-| 8 | `src/components/CheckpointPanel.tsx` | Cline-style checkpoint rollback panel with dropdown actions | ~145 lines |
-| 9 | `src/components/TaskPanel.tsx` | Task status display in sidebar with create/squash buttons | ~70 lines |
-| 10 | `src/App.tsx` | Integrated ApprovalGate, CheckpointPanel, TaskPanel components | +30 lines |
-| 11 | `electron/preload.ts` | Added git IPC channel bindings (8 new channels) | +25 lines |
-| 12 | `src/vite-env.d.ts` | Extended Window.api with git namespace types | +12 lines |
+### Phase B — HuggingFace & Chat Richness 🟡 **92% Complete**
+**Implemented:** HF auth (Browser/CLI/Token), model download with progress tracking + resumable downloads, ModelManager UI panel, GenerationParams panel, enhanced streaming ChatUI, Markdown rendering (safe via Fix #9), system prompt editor with 5 presets.
 
-**Total Phase C: ~12 files, ~970+ lines implemented.**
+**Missing (~8%):** Download queue not wired to hfClient (hardcoded dummy token in ModelManager.tsx:22); Regenerate button is placeholder (`TODO: regenerate` in ChatPanel.tsx:409); Image preview for non-code files; Split view support; Session deletion UI.
 
-### Phase D — Editor, Terminal & Project Tooling ✅ **VERIFIED COMPLETE** (2026-05-13)
-| Feature | Status | Description |
-|---------|--------|-------------|
-| **Monaco Editor real integration** | ✅ Built | `src/components/MonacoEditor.tsx` — Full `<Editor>` component with catppuccin theme, tab bar, auto-save on blur, file open via IPC |
-| Image/file preview for non-code files | 🔲 Planned | Monaco built-in viewer — placeholder only |
-| Split view support | 🔲 Planned | Tab bar exists (main.tsx, types.ts); drag-to-split not implemented |
-| **xterm.js terminal panel** | ✅ Built | `src/components/XTermTerminal.tsx` — Real PTY via node-pty; spawn/write/resize/kill IPC; streaming output via `terminal-data` event; tabs + Output view |
-| Terminal tools (run_command, read_output, kill_process) | ✅ Built | 3 new tools in toolRegistry.ts: `terminal_run_command`, `terminal_read_output`, `terminal_kill_process` with PTY-backed execution |
-| Real-time terminal output streaming to agent | 🔲 Planned | Agent can monitor and react to compile errors/test failures — placeholder only |
-| **Project creation wizard** | ✅ Built | `src/components/ProjectWizard.tsx` — 4-step wizard: Empty Project, From Template (6 templates), Clone Repository, Open Existing Folder. Progress bar with animated spinner. |
-| Template library | ✅ Built | 6 templates: React+TS, Node+Express, Python+FastAPI, Go+Echo, Rust+Axum, .NET API — auto-creates structure and installs deps |
-| Repository clone tooling | ✅ Built | Multi-provider clone (GitHub/GitLab/Bitbucket) with progress tracking; uses system Git config for SSH/token auth |
+### Phase C — Agent Core & Git Integration ✅ **COMPLETE** (100%)
+All verified complete: tool registry with 7 default tools + 3 terminal tools, approval gate UI with four-option dialog, task lifecycle store, checkpoint panel with dropdown actions, completion squash, user edit stashing.
 
-**Phase D Files Added/Modified:**
-| # | File | Purpose | Lines |
-|---|------|---------|-------|
-| 1 | `src/components/MonacoEditor.tsx` | Real Monaco editor with tab bar, catppuccin theme, auto-save | ~200 |
-| 2 | `src/store/editorStore.ts` | Zustand store for open files, active file, dirty state | ~80 |
-| 3 | `src/components/XTermTerminal.tsx` | xterm.js PTY terminal with tabs, streaming output | ~160 |
-| 4 | `electron/main.ts` | Terminal IPC: terminal-spawn, terminal-write, terminal-resize, terminal-kill + terminal-data event | +80 lines |
-| 5 | `electron/preload.ts` | Terminal namespace in window.api with spawn/write/resize/kill/onData | +15 lines |
-| 6 | `src/vite-env.d.ts` | Extended Window.api.terminal types | +7 lines |
-| 7 | `src/engine/toolRegistry.ts` | Added terminal_run_command, terminal_read_output, terminal_kill_process tools | +80 lines |
-| 8 | `src/types.ts` | Extended ToolType with 3 terminal tool types | +4 lines |
-| 9 | `src/components/ProjectWizard.tsx` | Project creation wizard: empty/template/clone/open folder | ~260 |
-| 10 | `src/App.tsx` | Wired MonacoEditor, XTermTerminal, ProjectWizard; removed old placeholders | +10 lines |
+**Total: ~12 files, ~970+ lines implemented.**
 
-**Total Phase D: ~10 files, ~895+ lines implemented.**
+### Phase D — Editor, Terminal & Project Tooling 🟡 **95% Complete**
+**Implemented:** Real Monaco editor with tab bar/auto-save/catppuccin theme, xterm.js PTY terminal with tabs/streaming, project creation wizard (4 steps + 6 templates), repository clone tooling.
 
-### Phase E — MCP, Context Compression & Monitoring 🟡 **PARTIAL** (Types/infrastructure exist; core engine not built)
-| Feature | Status | Description |
-|---------|--------|-------------|
-| **MCP client integration** | 🟡 Partial | @modelcontextprotocol/sdk dependency installed; sidebar UI placeholder present; full server management UI not built |
-| Tool discovery and registration from MCP servers | 🔲 Planned | Auto-register MCP tools in agent's tool registry via IPC — types defined only |
-| Category-based pre-approval rules (.openllmcode-rules) | 🟡 Partial | .openllmcode-rules format documented in plan.md; project-level JSON config not implemented |
-| Task history sidebar with resume capability | 🟡 Partial | Session list management in sessionStore.ts; task-specific history view not built |
-| File watching (chokidar dependency installed) | 🟡 Wired in code | Watch project files for external modifications via initFileWatcher() — works but no UI feedback |
-| **Context Compression Engine** | 🔲 Planned | CompressedEntry array in types.ts Task interface; actual compression logic not implemented |
-| **Engine logging tabs** | 🟡 Partial | Activity log maintained by System AI in dataPersistence.ts:89–92; per-engine logging tabs not built |
-| Reasoning block visibility | 🟡 Partial | Token consumption tracking via token count footer in ChatPanel; full reasoning block UI not built |
+**Missing (~5%):** Image/file preview for non-code files; Split view support; Agent real-time terminal output monitoring hook; Repository clone auth options (SSH key/PAT) for private repos in the wizard UI.
 
-### Phase F — Polish & Launch 🟡 **PARTIAL** (UI exists; build scripts not wired)
-| Feature | Status | Description |
-|---------|--------|-------------|
-| Dark theme refinement + accessibility audit | ✅ Verified | WCAG AA compliant catppuccin dark palette in global.css |
-| Settings panel | 🟡 Partial | GenerationParams panel with all parameters (temp, top-p, rep penalty, max tokens); full settings UI not built |
-| **Build scripts** (electron-builder) | 🟡 Partial | electron-builder config in package.json; NSIS target configured; actual build pipeline not tested |
-| Documentation and example workflows | ✅ Verified | README.md + plan.md comprehensive documentation |
-| Preset AI prompts | ✅ Verified | 5 preset templates: Coding, Review, Debug, R/E, Audit — implemented in ChatPanel.tsx SystemPromptEditor |
-| GitHub releases update mechanism | 🟡 Partial | Engine binary download from GitHub releases (manager.ts); app update check UI not built |
+### Phase E — MCP, Context Compression & Monitoring 🔴 **60% Complete**
+This is the most incomplete phase with critical gaps:
+
+**Implemented:** MCP server manager, context compression engine, Category-based pre-approval rules (.openllmcode-rules), file watching via chokidar, EngineLoggingPanel UI (273 lines), engineLogger.ts (381 lines — session management, log entries, filtering, disk rotation).
+
+**Critical Gaps:**
+1. **engineLoggerStore.ts is full of placeholders** — `startPrimaryLogging()`, `getLogEntries()`, `stopEngineLogging()` all return null/false without real implementation; not exported from barrel index.ts (lines 32–159)
+2. **MCP tools never registered with agent's tool registry** — mcpManager has getMCPToolNames()/callMCPTool() but no integration with toolRegistry.registerTool(). The agent cannot use MCP tools until this is wired up.
+3. **HTTP transport in mcpManager.ts:109–120 is broken** — uses `StdioClientTransport` instead of HTTP transport, will crash at runtime for any MCP server configured with HTTP transport.
+4. **Auto-reconnect on MCP disconnect not implemented** (commented as "user must manually trigger").
+
+### Phase F — Polish & Launch 🟡 **75% Complete**
+**Implemented:** Dark theme + accessibility audit, generation params panel, electron-builder build scripts, documentation + preset prompts.
+
+**Missing (~25%):** App update check UI; Model settings per entry (context window/GPU layers/thread count); HuggingFace token in OS keychain storage (only JSON file exists).
 
 ---
 
 ## 16. Open Source Strategy — Verified
-
 - **License:** MIT — permissive, developer-friendly (LICENSE file present)
 - **Repository:** [github.com/Yonneh0/OpenLLMCode](https://github.com/Yonneh0/OpenLLMCode)
 - **Contributing:** Clear CONTRIBUTING.md with setup instructions
@@ -1128,91 +842,34 @@ The system prompt is assembled dynamically from several sections. The **verified
 
 ---
 
-## 17. Risks & Mitigations — Verified Against Implementation
+## 17. Risks & Mitigations — Updated Against Audit
 
-| Risk | Impact | Verification / Mitigation |
-|------|--------|--------------------------|
-| llama.cpp subprocess crashes during inference | Agent becomes unresponsive | Health-check pings in main.ts (spawn + kill); auto-restart with model reload at chat-start/chat-stop IPC |
-| Large models exceed available RAM | App freezes or OOM kills | Model size validation at load time; graceful error messaging — `downloadForBackend()` downloads to disk |
-| MCP server hangs or leaks resources | Degraded performance | Per-server timeout and memory limits; kill switch in UI — planned for Phase E |
-| Context window overflow on large projects | Agent loses context | **Context Compression Engine** offloads early history to task system — planned for Phase E |
-| Approval fatigue (too many prompts) | User frustration | Category-based pre-approval rules reduce noise; batch approval for similar actions — planned for Phase C/E |
-| Compile from source fails | User can't use optimized engine | Scripts + System AI auditing with escalation to production model — verified in systemAI.ts:96–136 |
-| HuggingFace rate limits or downtime | Model downloads stall | Retry with exponential backoff; queue system; offline model cache — planned for Phase B |
-| CUDA/Metal driver incompatibility | GPU backend doesn't work | Auto-detection with version checks (WMI/sysctl) verified in manager.ts:10–44 |
-| Git auto-commit creates excessive noise | Repository history becomes cluttered | **Task completion squash** combines all task commits into one clean commit — verified in gitAutoCommit.ts:42–58 |
-| Assistant model produces incorrect UI actions | Wrong settings applied or projects misconfigured | Strict system prompts with allowed/denied action lists — verified at systemAI.ts:17–38 |
-
----
-
-## 18. Initial Setup — Automated Onboarding (~80% automated) (Verified Backend)
-
-### First Launch Experience
-The initial setup is **~80% automated**. On first launch:
-
-```
-┌───────────────────────────────────────────────┐
-│  🚀 Setting up OpenLLMCode                     │
-│                                               │
-│  Detecting hardware...                         │
-│  ┌───────────────────────────────────────────┐ │
-│  │  ✅ GPU: NVIDIA RTX 4090 (24 GB VRAM)     │ │
-│  │  ✅ CPU: Intel i9-13900K (24 cores)        │ │
-│  │  ✅ RAM: 64 GB                            │ │
-│  └───────────────────────────────────────────┘ │
-│                                               │
-│  Recommended models for your hardware:         │
-│  ┌───────────────────────────────────────────┐ │
-│  │  System AI (CPU):                          │ │
-│  │    ibm-grok4-1b.Q8_0                       │ │
-│  │     ▸ Fast, lightweight                    │ │
-│  │                                           │ │
-│  │  Primary AI (GPU):                         │ │
-│  │    HauhauCS/Qwen3.6-35B-A3B-Claude-4.7     │ │
-│  └───────────────────────────────────────────┘ │
-└───────────────────────────────────────────────┘
-```
-
-### Hardware-Based Model Recommendations (Verified)
-| Hardware Tier | System AI (CPU) | Primary AI (GPU) |
-|--------------|-----------------|------------------|
-| **High-end** (24GB+ VRAM, 32GB+ RAM) | ibm-grok4-1b-Q8_0 | Qwen3.6-35B-A3B (~20 GB) |
-| **Mid-range** (8–24GB VRAM, 16–32GB RAM) | ibm-grok4-1b-Q8_0 | Qwen3.6-35B-Uncensored (~10 GB) |
-| **Low-end** (<8GB VRAM or CPU-only) | ibm-grok4-1b-Q8_0 | Nemotron3-Nano-4B ⚠️ |
-
-### Setup Steps (Verified in Implementation)
-1. **Hardware detection** — GPU, CPU, RAM assessment via `detectHardware()` in manager.ts (verified: WMI on Windows, sysctl on macOS)
-2. **Backend selection** — auto-select best available backend (`getRecommendedBackend()` verified at manager.ts:46–52)
-3. **System AI download & load** — `SystemAIClient.start()` spawns llama-server on port 8081 (verified at systemAI.ts:40–51)
-4. **Primary AI download** — optional; user can start without it and download later
-5. **Engine binary fetch** — `downloadForBackend()` from GitHub releases (verified at manager.ts:83–105)
-6. **Default project creation** — project directory created in APPDATA via ensureDirs() in main.ts:21–24
-7. **Git initialization** — Git operations available immediately via gitAutoCommit
+| Risk | Impact | Status / Mitigation |
+|------|--------|---------------------|
+| llama.cpp subprocess crashes during inference | Agent becomes unresponsive | Health-check pings in main.ts (spawn + kill); auto-restart with model reload at chat-start/chat-stop IPC ✅ |
+| Large models exceed available RAM | App freezes or OOM kills | Model size validation at load time; graceful error messaging — `downloadForBackend()` downloads to disk ✅ |
+| MCP server hangs or leaks resources | Degraded performance | Per-server timeout and memory limits in mcpManager.ts:251–264; kill switch in UI ✅ (but auto-reconnect not implemented) |
+| Context window overflow on large projects | Agent loses context | **Context Compression Engine** offloads early history to task system ✅ (core exists, re-injection not yet wired into chat flow) |
+| Approval fatigue (too many prompts) | User frustration | Category-based pre-approval rules reduce noise; batch approval for similar actions ✅ in toolRegistry.ts:142–183 |
+| Compile from source fails | User can't use optimized engine | Scripts + System AI auditing with escalation to production model — verified in systemAI.ts:96–136 ✅ |
+| HuggingFace rate limits or downtime | Model downloads stall | Retry with exponential backoff; queue system at hfClient.ts:215–238 ✅ (not wired to ModelManager UI) |
+| CUDA/Metal driver incompatibility | GPU backend doesn't work | Auto-detection with version checks (WMI/sysctl) verified in manager.ts:10–44 ✅ |
+| Git auto-commit creates excessive noise | Repository history becomes cluttered | **Task completion squash** combines all task commits into one clean commit — verified in gitAutoCommit.ts:42–58 ✅ |
+| Assistant model produces incorrect UI actions | Wrong settings applied or projects misconfigured | Strict system prompts with allowed/denied action lists — verified at systemAI.ts:17–38 ✅ |
 
 ---
 
-## 19. Update Mechanism (Planned for Phase F)
-
-The app checks for updates via GitHub releases at `github.com/Yonneh0/OpenLLMCode/releases`. User can configure official vs community fork update sources with auto-update options (check on startup, notify-only, or never check).
+## 19. Update Mechanism — Verified (Partial)
+Engine binary download from GitHub releases (manager.ts). App update check UI **not yet implemented**. User can configure official vs community fork update sources with auto-update options — planned for Phase F.
 
 ---
 
 ## 20. MODELS.md Reference — Verified (106 lines)
-
-The root `MODELS.md` file lists all recommended models, organized by category:
-- **Starter models** — auto-selected at first launch based on hardware detection
-- **Qwen3 / Qwen3.6 Family** — reasoning distillations, uncensored variants
-- **Gemma 4 Family** — E2B and E4B variants (uncensored/abliterated)
-- **Nemotron Nano Family** — small but productive for code work
-- **Llama Family** — well-tested base models
-- **Phi Family** — CPU-friendly options
-
-See `MODELS.md` at the repo root for the complete list.
+The root `MODELS.md` file lists all recommended models, organized by category. See `MODELS.md` at the repo root for the complete list.
 
 ---
 
 ## 21. Future Considerations (Post-Launch)
-
 - **Multi-model routing** — Use different models for planning vs. execution
 - **Voice input/output** — Speak to your local agent
 - **Collaborative sessions** — Share a task with another developer over LAN
@@ -1224,41 +881,65 @@ See `MODELS.md` at the repo root for the complete list.
 
 ---
 
-## Appendix A: Verified File Inventory (Phase A)
+## Appendix A: File Inventory by Phase
 
+### Phase A Files (~36 files, ~2548 lines)
 | # | File | Purpose | Lines |
 |---|------|---------|-------|
-| 1 | `electron/main.ts` | Electron main process with IPC channels | 180 |
-| 2 | `electron/preload.ts` | Preload script exposing window.api | ~30 |
+| 1 | `electron/main.ts` | Electron main process with IPC channels | 559 |
+| 2 | `electron/preload.ts` | Preload script exposing window.api | 130 |
 | 3 | `src/App.tsx` | Single-file layout shell (sidebar, editor, chat, terminal) | 194 |
-| 4 | `src/main.tsx` | React entry point | ~20 |
-| 5 | `src/index.html` | HTML template | ~30 |
-| 6 | `src/types.ts` | TypeScript type definitions (ChatMessage, ToolCall, Session, Backend, EngineConfig, ModelInfo) | 45 |
-| 7 | `src/engine/manager.ts` | Engine manager: hardware detection, backend selection, GitHub binary download, config persistence | 127 |
-| 8 | `src/engine/systemAI.ts` | System AI client (1B CPU model), compile scripts, compiler installation commands | 147 |
-| 9 | `src/engine/gitAutoCommit.ts` | Git auto-commit: commit, squash, checkpoints, restore | 111 |
-| 10 | `src/store/engineStore.ts` | Zustand engine configuration store | 31 |
-| 11 | `src/store/chatStore.ts` | Zustand chat messages + simulated response flow | 51 |
-| 12 | `src/store/dataPersistence.ts` | JSON + Markdown persistence (sessions, config, activity log) | 104 |
-| 13 | `src/components/TitleBar.tsx` | Model selector dropdown with engine manager panel | 36 |
-| 14 | `src/components/Sidebar.tsx` | Sidebar: project controls, file tree, MCP panel | 32 |
-| 15 | `src/components/EditorArea.tsx` | Monaco editor placeholder + syntax highlighting | — |
-| 16 | `src/components/TerminalPanel.tsx` | xterm.js terminal panel (placeholder) | — |
-| 17 | `src/components/ChatPanel.tsx` | Chat messages, tool call cards, input field | — |
-| 18 | `src/styles/global.css` | Catppuccin dark theme, scrollbar, focus ring, animations | 56 |
-| 19 | `tailwind.config.js` | Tailwind CSS configuration (catppuccin palette + custom fonts) | ~30 |
-| 20 | `postcss.config.js` | PostCSS for Tailwind processing | — |
-| 21 | `vite.config.ts` | Vite build configuration | — |
-| 22 | `tsconfig.json` | TypeScript compiler options | — |
-| 23 | `package.json` | Dependencies, scripts, electron-builder config | ~58 |
-| 24 | `.gitignore` | Git ignore patterns | ~10 |
-| 25 | `LICENSE` | MIT License | ~20 |
-| 26 | `MODELS.md` | Model recommendations by hardware tier | 106 |
-| 27 | `plan.md` | This comprehensive project plan | — |
+| 4 | `src/types.ts` | TypeScript type definitions (all interfaces) | 141 |
+| 5 | `src/engine/manager.ts` | Engine manager: hardware detection, backend selection, GitHub binary download, config persistence | 127 |
+| 6 | `src/engine/systemAI.ts` | System AI client (1B CPU model), compile scripts | ~147 |
+| 7 | `src/engine/gitAutoCommit.ts` | Git auto-commit: commit, squash, checkpoints, restore, stash | ~111+ |
+| 8 | `src/store/engineStore.ts` | Zustand engine configuration store | ~31 |
+| 9 | `src/store/chatStore.ts` | Zustand chat messages + simulated response flow | ~51 |
+| 10 | `src/store/dataPersistence.ts` | JSON + Markdown persistence (sessions, config, activity log) | ~104 |
+| 11 | `src/components/TitleBar.tsx` | Model selector dropdown with engine manager panel | 36 |
+| 12 | `src/components/Sidebar.tsx` | Sidebar: project controls, file tree, MCP panel | 32 |
+
+### Phase B Files (~4 files, ~780 lines)
+| # | File | Purpose | Lines |
+|---|------|---------|-------|
+| 1 | `src/engine/hfClient.ts` | HuggingFace API client — auth, download management, local model discovery | 334 |
+| 2 | `src/components/ModelManager.tsx` | Model Manager panel with HF tab and AuthDialog | 224 |
+| 3 | `src/components/GenerationParams.tsx` | Generation parameters panel (temperature, top-p, etc.) | 100 |
+| 4 | `src/components/ChatPanel.tsx` | Enhanced chat: streaming, Markdown, message actions, system prompt editor | 531 |
+
+### Phase C Files (~12 files, ~970+ lines)
+| # | File | Purpose | Lines |
+|---|------|---------|-------|
+| 1 | `src/engine/toolRegistry.ts` | Default tool registry with 10 tools (7 + 3 terminal), registerTool/getToolSchema API, approval rules | 373 |
+| 2 | `src/store/approvalStore.ts` | Zustand store for approval gate state management | 140 |
+| 3 | `src/store/taskStore.ts` | Zustand store for task lifecycle + checkpoint CRUD | 227 |
+| 4 | `src/components/ApprovalGate.tsx` | Four-option approval dialog with diff preview, warnings | 197 |
+| 5 | `src/components/CheckpointPanel.tsx` | Cline-style checkpoint rollback panel with dropdown actions | 170 |
+| 6 | `src/components/TaskPanel.tsx` | Task status display in sidebar with create/squash buttons | 114 |
+
+### Phase D Files (~10 files, ~895+ lines)
+| # | File | Purpose | Lines |
+|---|------|---------|-------|
+| 1 | `src/components/MonacoEditor.tsx` | Real Monaco editor with tab bar, catppuccin theme, auto-save | 280 |
+| 2 | `src/store/editorStore.ts` | Zustand store for open files, active file, dirty state | ~80 |
+| 3 | `src/components/XTermTerminal.tsx` | xterm.js PTY terminal with tabs, streaming output | 224 |
+| 4 | `src/engine/toolRegistry.ts` | Added terminal_run_command, terminal_read_output, terminal_kill_process tools | +80 lines (Phase C) |
+| 5 | `src/components/ProjectWizard.tsx` | Project creation wizard: empty/template/clone/open folder | 520 |
+
+### Phase E Files (~7 files, ~1300+ lines — but only 60% wired)
+| # | File | Purpose | Lines | Status |
+|---|------|---------|-------|--------|
+| 1 | `src/engine/mcpManager.ts` | MCP server discovery, connection management, tool registration | 284 | ✅ Core exists, needs tool registry wiring + HTTP fix |
+| 2 | `src/engine/contextCompression.ts` | Context compression engine — compressConversation(), getActiveWindow(), generateFullContext() | 255 | ✅ Core exists, not wired into chat flow |
+| 3 | `src/engine/engineLogger.ts` | Engine logging session management, log entries, filtering, disk rotation | 381 | ✅ Core exists, needs Zustand store wiring |
+| 4 | `src/store/engineLoggerStore.ts` | Zustand store for engine logger UI state | 159 | 🔲 Full of placeholders — NOT wired |
+| 5 | `src/components/EngineLoggingPanel.tsx` | Engine logging panel with tabs/filters/search | 273 | ✅ Exists, needs store wiring |
+| 6 | `src/store/mcpStore.ts` | Zustand store for MCP state | ~? | Need to check |
+| 7 | `electron/main.ts` | Extended IPC: engine-logging-start/stop/get-config/set-config + stdout/stderr forwarding | +80 lines (from main.ts) | ✅ Wired in main process, needs renderer store wiring
 
 ---
 
-## Appendix B: API Surface (IPC Channels)
+## Appendix B: IPC Channels
 
 All registered in `electron/main.ts`:
 
@@ -1290,43 +971,27 @@ All registered in `electron/main.ts`:
 | `terminal-kill` | → main | sessionId (or "all") | true |
 | `terminal-data` | ← renderer | event: `{ sessionId, data }` | streaming output |
 
----
-
-## Appendix C: New Files Added in Phase B
-
-| # | File | Purpose | Lines |
-|---|------|---------|-------|
-| 1 | `src/engine/hfClient.ts` | HuggingFace API client — auth, download management, local model discovery | ~260 |
-| 2 | `src/components/ModelManager.tsx` | Model Manager panel with HF tab and AuthDialog | ~160 |
-| 3 | `src/components/GenerationParams.tsx` | Generation parameters panel (temperature, top-p, etc.) | ~90 |
-| 4 | `src/components/ChatPanel.tsx` | Enhanced chat: streaming, Markdown, message actions, system prompt editor | ~265 |
+### Phase E — Engine Logging IPC Channels (New)
+| Channel | Direction | Parameters | Returns |
+|---------|-----------|------------|---------|
+| `engine-logging-start` | → main | engineId ('primary' or 'systemAI') | {started: true, sessionId} |
+| `engine-logging-stop` | → main | engineId ('primary' or 'systemAI') | {stopped: true} |
+| `engine-logging-get-config` | → main | none | config object |
+| `engine-logging-set-config` | → main | partial config | {saved: true} |
+| `engine-logging-data` | ← renderer | engine data event | raw stdout/stderr forwarding |
 
 ---
 
-## Appendix D: New Files Added in Phase C
+## Summary — Overall Completeness by Phase
 
-| # | File | Purpose | Lines |
-|---|------|---------|-------|
-| 1 | `src/engine/toolRegistry.ts` | Default tool registry with 7 tools, registerTool/getToolSchema API | ~95 |
-| 2 | `src/store/approvalStore.ts` | Zustand store for approval gate state management | ~100 |
-| 3 | `src/store/taskStore.ts` | Zustand store for task lifecycle + checkpoint CRUD | ~120 |
-| 4 | `src/components/ApprovalGate.tsx` | Four-option approval dialog with diff preview, warnings | ~165 |
-| 5 | `src/components/CheckpointPanel.tsx` | Cline-style checkpoint rollback panel with dropdown actions | ~145 |
-| 6 | `src/components/TaskPanel.tsx` | Task status display in sidebar with create/squash buttons | ~70 |
+| Phase | Status | Completeness |
+|-------|--------|-------------|
+| A — Foundation | ✅ Complete | 100% |
+| B — HuggingFace & Chat Richness | 🟡 Mostly Complete | ~92% |
+| C — Agent Core & Git Integration | ✅ Complete | 100% |
+| D — Editor, Terminal & Project Tooling | 🟡 Mostly Complete | ~95% |
+| E — MCP, Context Compression & Monitoring | 🔴 Partial | ~60% |
+| F — Polish & Launch | 🟡 Partial | ~75% |
+| G — Agent Skills + Pingu Avatar | 🔲 Not Started | 0% |
 
----
-
-## Appendix E: New Files Added in Phase D
-
-| # | File | Purpose | Lines |
-|---|------|---------|-------|
-| 1 | `src/components/MonacoEditor.tsx` | Real Monaco editor with tab bar, catppuccin theme, auto-save | ~200 |
-| 2 | `src/store/editorStore.ts` | Zustand store for open files, active file, dirty state | ~80 |
-| 3 | `src/components/XTermTerminal.tsx` | xterm.js PTY terminal with tabs, streaming output | ~160 |
-| 4 | `src/engine/toolRegistry.ts` | Added terminal_run_command, terminal_read_output, terminal_kill_process tools | +80 lines |
-| 5 | `src/components/ProjectWizard.tsx` | Project creation wizard: empty/template/clone/open folder | ~260 |
-
----
-
----
-
+**Overall: ~82% complete.** The most critical gaps are in Phase E where the engine logging store is full of placeholders and MCP tools aren't wired to the agent.

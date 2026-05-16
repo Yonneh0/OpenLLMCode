@@ -1,14 +1,22 @@
 # Dependencies
 node_modules/
-package-lock.json
 yarn.lock
+pnpm-lock.yaml
 
-# Build output
+# Build output (Vite)
 dist/
 build/
 out/
 
-# Electron app
+# Build output (Electron)
+release-builds/
+*.dmg
+*.exe
+*.AppImage
+*.sig
+*.blockmap
+
+# Electron app logs & sockets
 *.log
 *.pid
 *.sock
@@ -25,25 +33,10 @@ sources/
 # System AI workspace
 system-ai/
 
-# OS-specific files
-.DS_Store
-Thumbs.db
-desktop.ini
+# Vite cache
+.vite/
 
-# IDE / Editor
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-*.swp
-*.swo
-*~
-.idea/
-*.sublime-*
-.project
-.settings/
-
-# TypeScript
+# TypeScript build info
 *.tsbuildinfo
 
 # Logs
@@ -67,3 +60,57 @@ temp/
 
 # Compiled assets (if using build system)
 assets/.compiled/
+
+# Electron native module rebuild output
+electron/rebuild/
+
+# Windows-specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.synology.index/
+@eaDir/
+
+# macOS-specific
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Icon?
+.trash
+
+# Linux-specific
+*.desktop
+*~
+.directory
+.goutputstream-*
+
+# IDE / Editor — VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# IDE / Editor — JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+*.sln
+*.suo
+*.user
+
+# IDE / Editor — Vim/Neovim
+*.swp
+*.swo
+*~
+
+# IDE / Editor — Sublime Text
+*.sublime-*
+
+# IDE / Editor — Others
+.project
+.settings/
+.claude/
+.clinerules/

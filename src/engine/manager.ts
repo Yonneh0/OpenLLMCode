@@ -3,7 +3,8 @@ import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type Backend = 'cpu' | 'cuda' | 'metal' | 'vulkan' | 'rocm';
+export { type Backend } from '../types';
+
 
 const GITHUB_RELEASES_URL = 'https://api.github.com/repos/ggerganov/llama.cpp/releases/latest';
 

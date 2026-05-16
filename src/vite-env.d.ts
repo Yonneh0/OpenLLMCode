@@ -79,6 +79,21 @@ interface Window {
     // Approval events (main → renderer notifications)
     approval: {
       onApprovalRequest: (callback: (data: unknown) => void) => () => void;
-    };
+    },
+
+    // Phase E — Engine logging (real-time monitoring of both engines during reasoning blocks)
+    engineLogging: {
+      start: (engineId: 'primary' | 'systemAI') => Promise<{ started: boolean; sessionId?: string }>;
+      stop: (engineId: 'primary' | 'systemAI') => Promise<{ stopped: boolean }>;
+      getConfig: () => Promise<{ enableDiskLogging: boolean; maxMemoryEntriesPerEngine: number }>;
+      setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => Promise<{ saved: boolean }>;
+      onEngineData: (callback: (data: unknown) => void) => () => void;
+      onLogEntry: (callback: (entry: unknown) => void) => () => void;
+    },
+
+    // Phase E — MCP server events (main → renderer notifications)
+    mcpServer: {
+      onChange: (callback: (data: unknown) => void) => () => void;
+    },
   };
 }

@@ -2,13 +2,14 @@ import React, { useState, useCallback } from 'react';
 import ApprovalGate from './components/ApprovalGate';
 import CheckpointPanel from './components/CheckpointPanel';
 import TaskPanel from './components/TaskPanel';
-import MonacoEditor from './components/MonacoEditor';
-import XTermTerminal from './components/XTermTerminal';
-import ProjectWizard from './components/ProjectWizard';
+import { MonacoEditor } from './components/MonacoEditor';
+import { XTermTerminal } from './components/XTermTerminal';
+import { ProjectWizard } from './components/ProjectWizard';
 import { ChatPanel } from './components/ChatPanel';
 import type { AgentMode } from './types';
 import { TitleBar } from './components/TitleBar';
 import { useFileTreeStore, FileItem } from './store/fileTreeStore';
+import { useTaskStore } from './store/taskStore';
 
 // Mode labels — single source of truth for mode toggle display
 const MODE_LABELS: Record<AgentMode, string> = {
@@ -21,18 +22,14 @@ const MODE_LABELS: Record<AgentMode, string> = {
 // File tree component — connected to store
 function FileTree() {
   const files = useFileTreeStore((s) => s.files);
-  const rootPath = useFileTreeStore((s) => s.rootPath);
   const loading = useFileTreeStore((s) => s.loading);
   const expandedDirs = useFileTreeStore((s) => s.expandedDirs);
   const toggleDir = useFileTreeStore((s) => s.toggleDir);
-
-  // Fix #4: File watcher is initialized from Sidebar's useEffect — no need to duplicate here (Issue #4)
 
   if (loading) {
     return <div className="text-xs text-[#6c7086]">Loading...</div>;
   }
 
-  // Render tree recursively — use proper FileItem type from store
   function renderTree(items: FileItem[], depth: number = 0) {
     return items.map((item) => (
       <li key={item.path} className="select-none">
@@ -59,7 +56,7 @@ function FileTree() {
   );
 }
 
-// Simple file icon based on extension — Fix #15: Use local interface since module resolution fails in strict mode (Issue #15)
+// Simple file icon based on extension
 function fileIcon(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
   const icons: Record<string, string> = {
@@ -71,7 +68,6 @@ function fileIcon(name: string): string {
   return icons[ext] ?? '📄';
 }
 
-// Fix #15: No module-level store access — all components get their own hook call (Issue #15)
 export function App() {
   const [mode, setMode] = useState<AgentMode>('plan');
   const [showWizard, setShowWizard] = useState(false);
@@ -80,9 +76,7 @@ export function App() {
   // Checkpoint handlers via IPC
   const handleRestoreCheckpoint = useCallback(async (checkpointHash: string) => {
     if (!checkpointHash) return;
-    try {
-      await window.api.git.restoreToCheckpoint(checkpointHash);
-    } catch {}
+    try { await window.api.git.restoreToCheckpoint(checkpointHash); } catch {}
   }, []);
 
   const handleDeleteContextAfterCheckpoint = useCallback((checkpointId: string) => {
@@ -91,7 +85,7 @@ export function App() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#1e1e2e] text-white font-sans">
-      {/* Title bar — mode buttons and model selector live here only (via TitleBar component) */}
+      {/* Title bar — mode buttons and model selector */}
       <TitleBar mode={mode} onModeChange={(m: AgentMode) => setMode(m)} />
 
       {/* Main content: sidebar | editor + chat */}
@@ -107,13 +101,13 @@ export function App() {
             </div>
           </div>
 
-          {/* File tree — connected to store */}
+          {/* File tree */}
           <div className="flex-1 overflow-y-auto px-3 py-2">
             <h2 className="text-xs font-semibold text-[#a6adc8] uppercase tracking-wider mb-1 mt-1">Files</h2>
             <FileTree />
           </div>
 
-          {/* Task Panel — Phase C */}
+          {/* Task Panel */}
           <TaskPanel />
 
           {/* MCP Servers */}
@@ -130,13 +124,13 @@ export function App() {
 
         {/* Chat panel — uses Phase B ChatPanel with streaming, Markdown, etc. */}
         <aside className="w-[420px] border-l border-[#45475a] flex-shrink-0 flex flex-col">
-          {/* Checkpoint Panel — Phase C (shown between header and ChatPanel) */}
+          {/* Checkpoint Panel */}
           <CheckpointPanel
             onRestore={handleRestoreCheckpoint}
             onDeleteContextAfter={handleDeleteContextAfterCheckpoint}
           />
 
-          {/* Chat messages — Phase B ChatPanel component handles its own session header + streaming UI */}
+          {/* Chat messages */}
           <ChatPanel />
         </aside>
       </main>
@@ -144,13 +138,11 @@ export function App() {
       {/* Terminal panel — real xterm.js with PTY streaming */}
       <XTermTerminal />
 
-      {/* Approval Gate Modal — Phase C (renders on top of everything) */}
+      {/* Approval Gate Modal */}
       <ApprovalGate />
 
-      {/* Project Creation Wizard — Phase D */}
+      {/* Project Creation Wizard */}
       <ProjectWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
     </div>
   );
 }
-
-// Note: Window.api type is declared in src/vite-env.d.ts — no duplicate declaration needed here.

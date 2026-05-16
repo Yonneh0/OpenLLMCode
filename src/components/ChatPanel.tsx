@@ -17,11 +17,15 @@ function escapeHtml(text: string): string {
     return div.innerHTML;
   }
   // Server-side fallback — manual escaping
+  const amp = String.fromCharCode(38) + 'amp;';
+  const lt = String.fromCharCode(38) + 'lt;';
+  const gt = String.fromCharCode(38) + 'gt;';
+  const quot = String.fromCharCode(38) + '#34;';
   return text
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"');
+    .replace(/&/g, amp)
+    .replace(/</g, lt)
+    .replace(/>/g, gt)
+    .replace(/"/g, quot);
 }
 
 // Fix #9: Render Markdown safely — no dangerouslySetInnerHTML for inline patterns.
@@ -187,6 +191,7 @@ function CopyButton({ content }: { content: string }) {
 // Fix #4: Wire GenerationParams onChange prop to store/parent state
 export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) {
   const [localConfig, setLocalConfig] = useState<GenerationConfig>(generationConfig || getDefaults());
+  const [showSystemPromptEditor, setShowSystemPromptEditor] = useState(false);
 
   // Update local config when parent passes new config
   useEffect(() => {
@@ -292,7 +297,7 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
         </div>
 
         {/* System prompt button */}
-        <button title="System Prompt" className="ml-1 px-2 py-0.5 rounded bg-[#313244] hover:bg-[#45475a] transition text-xs">⚙️</button>
+        <button title="System Prompt" onClick={() => setShowSystemPromptEditor(true)} className="ml-1 px-2 py-0.5 rounded bg-[#313244] hover:bg-[#45475a] transition text-xs">⚙️</button>
         <button className="px-2 py-0.5 bg-[#313244] hover:bg-[#45475a] rounded text-xs transition" title="New Session">+ New</button>
       </div>
 
@@ -376,7 +381,7 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
       </div>
 
       {/* System Prompt Editor Modal (Fix #6) */}
-      <SystemPromptEditor onConfigChange={handleConfigChange} />
+      <SystemPromptEditor isOpen={showSystemPromptEditor} onClose={() => setShowSystemPromptEditor(false)} onConfigChange={handleConfigChange} />
     </div>
   );
 }
@@ -440,9 +445,8 @@ function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'a
   );
 }
 
-// Fix #6: System Prompt Editor Modal — converted to controlled state so edits persist when modal reopens
-function SystemPromptEditor({ onConfigChange }: { onConfigChange?: (config: GenerationConfig) => void }) {
-  const [isOpen, setIsOpen] = useState(false);
+// Fix #6: System Prompt Editor Modal — controlled by parent via isOpen/onClose props
+function SystemPromptEditor({ isOpen, onClose, onConfigChange }: { isOpen: boolean; onClose: () => void; onConfigChange?: (config: GenerationConfig) => void }) {
   const [promptText, setPromptText] = useState('');
 
   // Open the modal and initialize prompt text from store or default
@@ -486,14 +490,12 @@ function SystemPromptEditor({ onConfigChange }: { onConfigChange?: (config: Gene
 
   const handleSave = () => {
     localStorage.setItem('openllmcode-system-prompt', promptText);
-    setIsOpen(false);
+    onClose();
   };
 
   if (!isOpen) return null;
-
-  // Note: The trigger button in ChatPanel header opens this modal via its own onClick handler.
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setIsOpen(false)}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
       <div className="w-[640px] max-h-[80vh] rounded-lg border border-[#45475a] shadow-xl overflow-hidden flex flex-col">
         <div className="bg-[#1e1e2e] px-6 py-4 border-b border-[#45475a]">
           <h3 className="text-sm font-semibold text-[#cdd6f4]">📝 System Prompt Editor</h3>
@@ -520,7 +522,7 @@ function SystemPromptEditor({ onConfigChange }: { onConfigChange?: (config: Gene
           className="flex-1 bg-[#1e1e2e] border-none px-6 py-3 text-sm font-mono focus:outline-none resize-none" />
 
         <div className="px-6 py-3 bg-[#181825]/60 border-t border-[#45475a] flex justify-end gap-2">
-          <button onClick={() => setIsOpen(false)} className="px-3 py-1.5 rounded text-xs hover:bg-[#313244] transition">Cancel</button>
+          <button onClick={onClose} className="px-3 py-1.5 rounded text-xs hover:bg-[#313244] transition">Cancel</button>
           <button onClick={handleSave} className="px-3 py-1.5 rounded bg-[#cba6f7] hover:bg-[#b4befe] text-black font-semibold text-xs transition">Save & Apply</button>
         </div>
       </div>
