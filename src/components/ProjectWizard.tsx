@@ -2,6 +2,21 @@ import React, { useCallback, useState } from 'react';
 
 type WizardStep = 'welcome' | 'empty' | 'template' | 'clone' | 'open' | 'progress';
 
+// ─── Clone authentication types ──────────────
+
+interface CloneAuthConfig {
+  authType: 'none' | 'token' | 'ssh_key' | 'credential_helper';
+  token?: string;        // GitHub/GitLab PAT (masked)
+  sshKeyPath?: string;   // Path to SSH private key file
+}
+
+const KNOWN_SSH_KEYS = [
+  '~/.ssh/id_rsa',
+  '~/.ssh/id_ed25519',
+  '~/.ssh/id_ecdsa',
+  '~/.ssh/id_dsa',
+];
+
 interface TemplateOption {
   id: string;
   name: string;
@@ -89,6 +104,45 @@ interface ProjectWizardProps {
   onClose: () => void;
 }
 
+// Helper to expand ~ in paths (Fix for cross-platform path handling)
+function expandHome(p: string): string {
+  if (!p.startsWith('~')) return p;
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  return home ? `${home}/${p.slice(2)}` : p;
+}
+
+// Helper to check if a URL is likely private (GitHub/GitLab/Bitbucket pattern matching)
+function detectProvider(url: string): 'github' | 'gitlab' | 'bitbucket' | null {
+  if (url.includes('github.com')) return 'github';
+  if (url.includes('gitlab.com') || url.includes('gitlab.')) return 'gitlab';
+  if (url.includes('bitbucket.org')) return 'bitbucket';
+  return null;
+}
+
+// Helper to build authenticated clone URL from PAT — embeds token in HTTPS URL for authentication
+function buildAuthenticatedUrl(originalUrl: string, token: string): string {
+  // Replace https://host.com/ with https://user:token@host.com/ 
+  const authPrefix = 'https://';
+  if (originalUrl.startsWith(authPrefix)) {
+    return originalUrl.replace(
+      /\/\/([^/@]+)@/,
+      `//${encodeURIComponent('x-access-token')}:${encodeURIComponent(token)}@`
+    );
+  }
+  // Handle git@ host:pattern — convert to HTTPS with token
+  if (originalUrl.startsWith('git@')) {
+    const https = originalUrl.replace(':', '/').replace(/.*:/, '');
+    return authPrefix + 'x-access-token:' + token + '@' + https;
+  }
+  return originalUrl;
+}
+
+// Helper to build SSH clone command with a specific key — uses GIT_SSH_COMMAND for custom key path
+function buildSshCloneCommand(sshKeyPath: string): string {
+  const expanded = expandHome(sshKeyPath);
+  return `GIT_SSH_COMMAND="ssh -i ${expanded} -o StrictHostKeyChecking=no" `;
+}
+
 export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
   const [step, setStep] = useState<WizardStep>('welcome');
@@ -164,7 +218,7 @@ export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose })
     }
   }, [selectedTemplate, onClose]);
 
-  // Clone a repository
+  // Clone a repository — with optional auth support for private repos
   const cloneRepository = useCallback(async () => {
     if (!cloneUrl.trim()) return;
 
@@ -180,7 +234,28 @@ export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose })
       setStatusMsg(`Cloning ${cloneUrl}...`);
       setProgress(30);
 
-      await window.api.execCommand(`git clone "${cloneUrl}" "${newRoot}"`);
+      let fullCmd: string;
+      
+      if (authConfig.authType === 'token' && authConfig.token) {
+        // Use PAT — embed token in HTTPS URL for authentication
+        const authenticatedUrl = buildAuthenticatedUrl(cloneUrl, authConfig.token);
+        fullCmd = `git clone "${authenticatedUrl}" "${newRoot}"`;
+        setStatusMsg(`Cloning (using token)...`);
+      } else if (authConfig.authType === 'ssh_key' && authConfig.sshKeyPath) {
+        // Use custom SSH key — set GIT_SSH_COMMAND with the private key path
+        const sshCmd = buildSshCloneCommand(authConfig.sshKeyPath);
+        fullCmd = `${sshCmd}git clone "${cloneUrl}" "${newRoot}"`;
+        setStatusMsg(`Cloning (using SSH key)...`);
+      } else if (authConfig.authType === 'credential_helper') {
+        // Use Git credential helper — let system handle auth via Windows Credential Manager / macOS Keychain
+        fullCmd = `git clone --config core.autocrlf=false "${cloneUrl}" "${newRoot}"`;
+        setStatusMsg(`Cloning (using credentials manager)...`);
+      } else {
+        // No authentication — assume public repo
+        fullCmd = `git clone "${cloneUrl}" "${newRoot}"`;
+      }
+
+      await window.api.execCommand(fullCmd);
       setProgress(80);
 
       setStatusMsg('Setting project root...');
@@ -193,7 +268,7 @@ export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose })
     } catch (err) {
       setStatusMsg(`Error: ${err}`);
     }
-  }, [cloneUrl, projectName, onClose]);
+  }, [cloneUrl, projectName, onClose, authConfig]);
 
   // Open an existing folder
   const openExistingFolder = useCallback(async () => {
@@ -363,6 +438,112 @@ export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose })
   );
 };
 
+// ─── Authentication sub-step — shown when cloning private repos ──────────────
+
+const CloneAuthOptions: React.FC<{
+  cloneUrl: string;
+  config: CloneAuthConfig;
+  setConfig: (c: CloneAuthConfig) => void;
+}> = ({ cloneUrl, config, setConfig }) => {
+  const [tokenVisible, setTokenVisible] = useState(false);
+
+  return (
+    <div className="border border-[#313244] rounded-lg bg-[#181825] p-4 mb-4">
+      <p className="text-xs text-[#9399b2] mb-3 font-medium uppercase tracking-wider">Authentication (optional)</p>
+
+      {/* Auth type selector */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {([
+          { value: 'none', label: 'None' },
+          { value: 'token', label: 'Token' },
+          { value: 'ssh_key', label: 'SSH Key' },
+          { value: 'credential_helper', label: 'Credential Helper' },
+        ] as const).map(({ value, label }) => (
+          <button
+            key={value}
+            onClick={() => setConfig({ ...config, authType: value, token: undefined, sshKeyPath: undefined })}
+            className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
+              config.authType === value
+                ? 'bg-[#89b4fa] border-[#89b4fa] text-[#1e1e2e]'
+                : 'bg-[#1e1e2e] border-[#313244] text-[#cdd6f4] hover:bg-[#313244]'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Token input */}
+      {config.authType === 'token' && (
+        <div className="space-y-2">
+          <p className="text-xs text-[#6c7086]">
+            Personal Access Token for {detectProvider(cloneUrl) ? detectProvider(cloneUrl)!.charAt(0).toUpperCase() + detectProvider(cloneUrl)!.slice(1) : 'the repository'}
+          </p>
+          <div className="flex gap-2">
+            <input
+              type={tokenVisible ? 'text' : 'password'}
+              value={config.token || ''}
+              onChange={(e) => setConfig({ ...config, token: e.target.value })}
+              placeholder="ghp_xxxxxxxxxxxx"
+              className="flex-1 px-3 py-2 bg-[#1e1e2e] border border-[#313244] rounded-lg text-sm text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa]"
+            />
+            <button
+              type="button"
+              onClick={() => setTokenVisible(!tokenVisible)}
+              className="px-2.5 py-2 bg-[#1e1e2e] border border-[#313244] rounded-lg text-xs text-[#6c7086] hover:text-[#cdd6f4] transition-colors"
+            >
+              {tokenVisible ? '👁️' : '🙈'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SSH key selector */}
+      {config.authType === 'ssh_key' && (
+        <div className="space-y-2">
+          <p className="text-xs text-[#6c7086]">Choose an SSH private key for authentication:</p>
+          <select
+            value={config.sshKeyPath || ''}
+            onChange={(e) => setConfig({ ...config, sshKeyPath: e.target.value })}
+            className="w-full px-3 py-2 bg-[#1e1e2e] border border-[#313244] rounded-lg text-sm text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa]"
+          >
+            <option value="">— Select a key —</option>
+            {KNOWN_SSH_KEYS.map((keyPath) => (
+              <option key={keyPath} value={keyPath}>{keyPath}</option>
+            ))}
+            <option value="__custom">Custom path...</option>
+          </select>
+          {/* Custom SSH key input — shown when "Custom path..." is selected */}
+          {config.sshKeyPath === '__custom' && (
+            <input
+              type="text"
+              value={config.sshKeyPath || ''}
+              onChange={(e) => setConfig({ ...config, sshKeyPath: e.target.value })}
+              placeholder="/path/to/your/private/key"
+              className="w-full px-3 py-2 bg-[#1e1e2e] border border-[#313244] rounded-lg text-sm text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa]"
+            />
+          )}
+        </div>
+      )}
+
+      {/* Credential helper — just an info note */}
+      {config.authType === 'credential_helper' && (
+        <p className="text-xs text-[#6c7086]">
+          Uses your system's Git credential helper (e.g., Windows Credential Manager or macOS Keychain). 
+          You'll be prompted by the OS if authentication is needed.
+        </p>
+      )}
+
+      {/* Provider info — shows what type of repo this looks like */}
+      {cloneUrl.trim() && detectProvider(cloneUrl) && (
+        <div className="mt-2 px-2 py-1 bg-[#89b4fa]/10 border border-[#89b4fa]/30 rounded text-xs text-[#89b4fa]">
+          Detected: {detectProvider(cloneUrl)!.charAt(0).toUpperCase() + detectProvider(cloneUrl)!.slice(1)} repository — use a PAT for best results
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Sub-steps ──────────────
 
 const EmptyProjectStep: React.FC<{
@@ -457,44 +638,53 @@ const CloneStep: React.FC<{
   onClone: () => void;
   onBack: () => void;
   onClose: () => void;
-}> = ({ cloneUrl, setCloneUrl, projectName, setProjectName, onClone, onBack }) => (
-  <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onBack}>
-    <div className="bg-[#1e1e2e] rounded-xl p-8 w-full max-w-md border border-[#313244]" onClick={(e) => e.stopPropagation()}>
-      <h2 className="text-lg font-semibold text-[#cdd6f4] mb-4">🔗 Clone Repository</h2>
+}> = ({ cloneUrl, setCloneUrl, projectName, setProjectName, onClone, onBack }) => {
+  const [authConfig, setAuthConfig] = useState<CloneAuthConfig>({ authType: 'none' });
 
-      <label className="block text-sm text-[#9399b2] mb-1">Repository URL</label>
-      <input
-        type="text"
-        value={cloneUrl}
-        onChange={(e) => setCloneUrl(e.target.value)}
-        placeholder="https://github.com/user/repo.git"
-        className="w-full px-3 py-2 bg-[#181825] border border-[#313244] rounded-lg text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa] mb-3"
-      />
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onBack}>
+      <div className="bg-[#1e1e2e] rounded-xl p-8 w-full max-w-md border border-[#313244]" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-[#cdd6f4] mb-4">🔗 Clone Repository</h2>
 
-      <label className="block text-sm text-[#9399b2] mb-1">Project Name (optional)</label>
-      <input
-        type="text"
-        value={projectName}
-        onChange={(e) => setProjectName(e.target.value)}
-        placeholder="Auto-detected from URL"
-        className="w-full px-3 py-2 bg-[#181825] border border-[#313244] rounded-lg text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa]"
-      />
+        <label className="block text-sm text-[#9399b2] mb-1">Repository URL</label>
+        <input
+          type="text"
+          value={cloneUrl}
+          onChange={(e) => setCloneUrl(e.target.value)}
+          placeholder="https://github.com/user/repo.git"
+          className="w-full px-3 py-2 bg-[#181825] border border-[#313244] rounded-lg text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa] mb-3"
+        />
 
-      <div className="flex gap-3 mt-6">
-        <button onClick={onBack} className="flex-1 py-2 border border-[#313244] text-[#cdd6f4] rounded-lg hover:bg-[#313244] transition-colors">
-          Back
-        </button>
-        <button
-          onClick={onClone}
-          disabled={!cloneUrl.trim()}
-          className="flex-1 py-2 bg-[#89b4fa] hover:bg-[#74c7ec] text-[#1e1e2e] font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Clone
-        </button>
+        <label className="block text-sm text-[#9399b2] mb-1">Project Name (optional)</label>
+        <input
+          type="text"
+          value={projectName}
+          onChange={(e) => setProjectName(e.target.value)}
+          placeholder="Auto-detected from URL"
+          className="w-full px-3 py-2 bg-[#181825] border border-[#313244] rounded-lg text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa]"
+        />
+
+        {/* Authentication options — expandable */}
+        <div className="mt-4">
+          <CloneAuthOptions cloneUrl={cloneUrl} config={authConfig} setConfig={setAuthConfig} />
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          <button onClick={onBack} className="flex-1 py-2 border border-[#313244] text-[#cdd6f4] rounded-lg hover:bg-[#313244] transition-colors">
+            Back
+          </button>
+          <button
+            onClick={onClone}
+            disabled={!cloneUrl.trim()}
+            className="flex-1 py-2 bg-[#89b4fa] hover:bg-[#74c7ec] text-[#1e1e2e] font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Clone
+          </button>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const OpenFolderStep: React.FC<{
   onOpen: () => void;

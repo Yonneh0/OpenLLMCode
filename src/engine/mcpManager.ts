@@ -477,8 +477,20 @@ export async function healthCheck(): Promise<Map<string, MCPServer>> {
         // Re-register tools after auto-reconnect
         mcpToolsRegistered = false;
         await registerMCPToolsWithRegistry();
+        
+        // Notify user of successful reconnect — P3-A: Auto-reconnect notifications
+        try {
+          const notificationStore = await import('../store/notificationStore');
+          notificationStore.addMCPReconnectSuccess(server.name);
+        } catch {}
       } catch (err) {
         console.warn(`Failed to auto-reconnect MCP server "${server.name}":`, err);
+        
+        // Notify user of failed reconnect — P3-A: Auto-reconnect notifications
+        try {
+          const notificationStore = await import('../store/notificationStore');
+          notificationStore.addMCPReconnectError(server.name);
+        } catch {}
       }
     } else if (server.status === 'connected') {
       // Server is healthy — record it

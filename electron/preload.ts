@@ -2,6 +2,63 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 export interface AppConfig { backend?: string; binarySource?: string; selectedModel?: string; systemAIModel?: string; hfToken?: string; }
+
+// ─── Exported types for renderer use ──────────────────────────────
+export type Callback = (msg: unknown) => void;
+
+// QEMU/KVM Simulation Layer API types — mirrors the IPC handler signatures in preload.ts  
+export interface QemuAPI {
+  // VM lifecycle operations
+  create: (config: Record<string, unknown>) => Promise<unknown>;
+  start: (vmId: string) => Promise<void>;
+  pause: (vmId: string) => Promise<void>;
+  resume: (vmId: string) => Promise<void>;
+  stop: (vmId: string) => Promise<void>;
+  delete: (vmId: string) => Promise<void>;
+
+  // QMP command execution — per the QEMU Machine Protocol Specification chapter  
+  monitorSend: (vmId: string, command: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+  // VM listing and disk operations
+  listInstances: () => Promise<{ count: number; running: unknown[] }>;
+  createDiskImage: (format: string, sizeMB: number, path: string) => Promise<void>;
+  convertDiskImage: (srcFormat: string, dstFormat: string, srcPath: string, dstPath: string) => Promise<void>;
+  getDiskInfo: (path: string) => Promise<unknown>;
+
+  // Architecture discovery
+  getAvailableMachines: (arch: string) => Promise<unknown[]>;
+  getAvailableCPUs: (arch: string) => Promise<string[]>;
+
+  // Hotplug operations — per -machine cpu-hotplug and device_add docs  
+  hotplugCPU: (vmId: string, socketId: number) => Promise<void>;
+  addMemory: (vmId: string, sizeBytes: number) => Promise<void>;
+
+  // Block device query — per QMP "query-block" command  
+  queryBlocks: (vmId: string) => Promise<unknown>;
+
+  // Snapshot operations — per qcow2 snapshot support in Disk Images chapter
+  createSnapshot: (vmId: string, driveId: string) => Promise<string>;
+
+  // KVM availability check
+  checkKVM: () => Promise<boolean>;
+
+  // Get available network backends — per -netdev help docs  
+  getNetBackends: () => Promise<string[]>;
+
+  // Output stream subscription
+  onQemuOutput: (callback: (data: unknown) => void) => () => void;
+
+  // Toolchain management — per-architecture toolchain download and caching from cross-compile docs  
+  listToolchains: () => Promise<unknown[]>;
+  ensureToolchain: (arch: string) => Promise<unknown>;
+  getProjectToolchains: (projectDir: string) => Promise<Record<string, unknown>>;
+}
+
+declare global {
+  interface Window {
+    api: import('./preload').Api & { qemu?: QemuAPI };
+  }
+}
 type Callback = (msg: unknown) => void;
 
 contextBridge.exposeInMainWorld('api', {
@@ -93,6 +150,7 @@ contextBridge.exposeInMainWorld('api', {
   // Dialogs
   dialog: {
     selectFolder: (parentWindow?: any) => ipcRenderer.invoke('dialog-select-folder', parentWindow),
+    selectFile: (parentWindow?: any) => ipcRenderer.invoke('dialog-select-file', parentWindow),
   },
 
   // Store config for Electron to read
@@ -132,4 +190,61 @@ contextBridge.exposeInMainWorld('api', {
 
   // App shutdown cleanup
   appShutdown: () => ipcRenderer.invoke('app-shutdown'),
+
+  // ─── QEMU/KVM Simulation Layer API ──────────────────────────────  
+  qemu: {
+    // VM lifecycle — per QMP commands from vm-run-state and monitor sections of QMP spec  
+    create: (config: Record<string, unknown>) => ipcRenderer.invoke('qemu-vm-create', config),
+    start: (vmId: string) => ipcRenderer.invoke('qemu-vm-start', vmId),
+    pause: (vmId: string) => ipcRenderer.invoke('qemu-vm-pause', vmId),
+    resume: (vmId: string) => ipcRenderer.invoke('qemu-vm-resume', vmId),
+    stop: (vmId: string) => ipcRenderer.invoke('qemu-vm-stop', vmId),
+    delete: (vmId: string) => ipcRenderer.invoke('qemu-vm-delete', vmId),
+
+    // QMP command execution — per the QEMU Machine Protocol Specification chapter's protocol specification section  
+    monitorSend: (vmId: string, command: string, args?: Record<string, unknown>) => 
+      ipcRenderer.invoke('qemu-monitor-send', vmId, command, args || {}),
+
+    // Get all VM instances — returns copy to prevent mutation from renderer side  
+    listInstances: () => ipcRenderer.invoke('qemu-vm-list'),
+
+    // QEMU-img operations — per the tools/qemu-img docs for disk image management in Tools chapter  
+    createDiskImage: (format: string, sizeMB: number, path: string) => 
+      ipcRenderer.invoke('qemu-img-create', format, sizeMB, path),
+    convertDiskImage: (srcFormat: string, dstFormat: string, srcPath: string, dstPath: string) => 
+      ipcRenderer.invoke('qemu-img-convert', srcFormat, dstFormat, srcPath, dstPath),
+    getDiskInfo: (path: string) => ipcRenderer.invoke('qemu-img-info', path),
+
+    // Architecture discovery helpers — per -machine, -cpu help for each arch from QEMU docs  
+    getAvailableMachines: (arch: string) => ipcRenderer.invoke('qemu-get-available-machines', arch),
+    getAvailableCPUs: (arch: string) => ipcRenderer.invoke('qemu-get-available-cpus', arch),
+
+    // Hotplug operations — per -machine cpu-hotplug and device_add docs  
+    hotplugCPU: (vmId: string, socketId: number) => ipcRenderer.invoke('qemu-hotplug-cpu', vmId, socketId),
+    addMemory: (vmId: string, sizeBytes: number) => ipcRenderer.invoke('qemu-add-memory', vmId, sizeBytes),
+
+    // Block device query — per QMP "query-block" command from block-devices section of QMP spec  
+    queryBlocks: (vmId: string) => ipcRenderer.invoke('qemu-query-blocks', vmId),
+
+    // Snapshot operations — per qcow2 snapshot support in Disk Images chapter and drive-mirror docs  
+    createSnapshot: (vmId: string, driveId: string) => ipcRenderer.invoke('qemu-create-snapshot', vmId, driveId),
+
+    // KVM availability check — per kernel-irqchip and -enable-kvm docs (per /dev/kvm check in QEMU docs)
+    checkKVM: () => ipcRenderer.invoke('qemu-check-kvm-availability'),
+
+    // Get available network backends — per -netdev help docs in Network Devices chapter  
+    getNetBackends: () => ipcRenderer.invoke('qemu-get-available-net-backends'),
+
+    // Output stream subscription — per the VM run state docs, stdout/stderr carry guest OS console output
+    onQemuOutput: (callback: Callback) => {
+      const handler = (_e: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('qemu-output', handler);
+      return () => ipcRenderer.removeListener('qemu-output', handler);
+    },
+
+    // Toolchain management — per-architecture toolchain download and caching from cross-compile docs  
+    listToolchains: () => ipcRenderer.invoke('qemu-toolchain-list'),
+    ensureToolchain: (arch: string) => ipcRenderer.invoke('qemu-toolchain-ensure', arch),
+    getProjectToolchains: (projectDir: string) => ipcRenderer.invoke('qemu-toolchain-project-config', projectDir),
+  },
 });

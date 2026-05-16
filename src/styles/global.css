@@ -11,17 +11,15 @@ html, body, #root {
   padding: 0;
 }
 
-.chat-scroll::-webkit-scrollbar {
-  width: 6px;
-}
+/* VS Code thin scrollbar style */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #424242; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #4F4F4F; }
 
-.chat-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.chat-scroll::-webkit-scrollbar-thumb {
-  background: #45475a;
-  border-radius: 3px;
+/* VS Code focus ring — blue outline on focus-visible elements */
+input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible { 
+  box-shadow: inset 0 0 0 1px #007ACC; 
 }
 
 @keyframes pulse-slow {

@@ -1,9 +1,11 @@
-// Enhanced chat panel — streaming, Markdown rendering, message actions (Phase B)
+// Enhanced chat panel — streaming, Markdown rendering, message actions (VS Code Dark+ aesthetic)
 import React, { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 import type { GenerationConfig, ChatMessage, CompressedEntry } from '../types';
 import { getDefaults } from './GenerationParams';
-import { compressConversation, shouldCompress } from '../engine/contextCompression';
+import { compressConversation, shouldCompress, assembleTurnContext } from '../engine/contextCompression';
+import { useContextStore } from '../store/contextStore';
+import { addContextCompressionSuccess } from '../store/notificationStore';
 
 // Track tokens/second speed for streaming display
 let tokenSpeedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -45,14 +47,14 @@ function renderMarkdown(text: string): React.ReactNode {
   function flushCodeBlock() {
     if (codeContent) {
       result.push(
-        <div key={`cb-${result.length}`} className="rounded bg-[#181825]/60 border border-[#45475a] mt-2 overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-1.5 bg-[#1e1e2e] border-b border-[#45475a] text-xs">
+        <div key={`cb-${result.length}`} className="rounded bg-[#181825]/60 border border-[#404040] mt-2 overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#1E1E1E] border-b border-[#404040] text-xs">
             {codeLang ? (
-              <span className="text-[#a6adc8]">{codeLang}</span>
+              <span className="text-[#858585]">{codeLang}</span>
             ) : (
-              <span className="text-[#a6adc8]">Code</span>
+              <span className="text-[#858585]">Code</span>
             )}
-            <button onClick={() => navigator.clipboard.writeText(codeContent.trim())} className="px-2 py-0.5 rounded bg-[#313244] hover:bg-[#45475a] transition text-xs">📋 Copy</button>
+            <button onClick={() => navigator.clipboard.writeText(codeContent.trim())} className="px-2 py-0.5 rounded bg-[#3C3C3C] hover:bg-[#404040] transition text-xs">Copy</button>
           </div>
           <pre className="p-3 font-mono text-sm overflow-x-auto max-h-64">{codeContent.trim()}</pre>
         </div>
@@ -75,7 +77,7 @@ function renderMarkdown(text: string): React.ReactNode {
       }
       if (part.isCode) {
         return (
-          <code key={`c-${idx}`} className="bg-[#313244] px-1.5 py-0.5 rounded text-xs font-mono">
+          <code key={`c-${idx}`} className="bg-[#3C3C3C] px-1.5 py-0.5 rounded text-xs font-mono">
             {escapeHtml(part.text)}
           </code>
         );
@@ -250,24 +252,46 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
     addMessage('user', text);
     setInputValue('');
 
-    // ─── Context Compression Check (Phase E-4) ──────────────
-    // Before sending, check if the conversation should be compressed
+    // ─── Auto Context Compression (P1-A: Context compression auto-wiring) ──────────────
+    // On EVERY message, check if the conversation should be compressed.
+    // If so, compress and update global contextStore — this ensures System AI always
+    // has access to the compressed preamble for every turn.
     let isCompressing = false;
     const allMessages = useChatStore.getState().messages;
     if (shouldCompress(allMessages)) {
       isCompressing = true;
+      
+      // Set compression in progress state
+      useContextStore.getState().setIsCompressing(true);
+      
       try {
+        // Get existing compressed history from global store for accurate total context calculation
+        const existingHistory = useContextStore.getState().compressedHistory;
+        
         const updatedHistory = await compressConversation(
           allMessages.map(m => ({ id: m.id, role: m.role, content: m.content })),
-          [] // Use empty array — compression engine handles its own history tracking internally
+          existingHistory
         );
+        
+        // Update global store — this auto-saves to localStorage too
+        useContextStore.getState().setCompressedHistory(updatedHistory);
         
         setCompressedHistory(updatedHistory);
         setShowCompressionStatus(true);
+        
+        // Show notification that compression occurred
+        addContextCompressionSuccess(updatedHistory.length - existingHistory.length);
       } catch (err) {
         console.warn('Context compression failed:', err);
+      } finally {
+        useContextStore.getState().setIsCompressing(false);
       }
     }
+
+    // Assemble turn context — automatically includes compressed history as preamble
+    // This ensures System AI always gets the full context (compressed + active) on every turn
+    const globalHistory = useContextStore.getState().compressedHistory;
+    const turnContext = assembleTurnContext(globalHistory, allMessages);
 
     // Start streaming response after delay
     setTimeout(() => {
@@ -343,38 +367,49 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
 
   const currentConfig = generationConfig || getDefaults();
 
+  // Mode toggles for the right panel
+  const [activeMode, setActiveMode] = useState('plan');
+  
+  // Model selector state — controlled by parent via prop or local default
+  const [localModel, setLocalModel] = useState('ibm-grok4-1b.Q8_0');
+
   return (
     <div className="flex flex-col h-full">
-      {/* Chat header */}
-      <div className="px-3 py-2 border-b border-[#45475a] bg-[#181825]/40 flex items-center gap-2">
-        <span className="text-sm font-semibold text-[#a6adc8]">Chat</span>
+      {/* Chat header — VS Code panel style */}
+      <div className="px-3 py-2 border-b border-[#404040] bg-[#1E1E1E] flex items-center gap-2">
+        <span className="text-xs font-semibold text-[#858585] uppercase tracking-wider">Chat</span>
 
         {/* Session dropdown */}
-        <select defaultValue={messages.length > 0 ? 'session' : ''} className="ml-auto bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-1 text-xs">
+        <select defaultValue={messages.length > 0 ? 'session' : ''} className="ml-auto bg-[#1E1E1E] border border-[#3C3C3C] rounded px-2 py-0.5 text-xs cursor-pointer">
           <option value="session">Session 1</option>
         </select>
 
-        {/* Mode buttons */}
+        {/* Mode buttons — VS Code tab-style */}
         <div className="flex items-center gap-0.5 ml-2">
-          <button className="px-2 py-0.5 rounded bg-[#45475a] text-xs font-semibold hover:bg-[#585b70] transition">📋 Plan</button>
-          <button className="px-2 py-0.5 rounded bg-[#313244] text-xs hover:bg-[#45475a] transition">⚡ Act</button>
-          <button className="px-2 py-0.5 rounded bg-[#313244] text-xs hover:bg-[#45475a] transition">🔍 R/E</button>
+          {['Plan', 'Act', 'R/E'].map((mode) => (
+            <button 
+              key={mode}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+                mode === 'Plan' ? 'bg-[#007ACC] text-white' : 'bg-[#3C3C3C] hover:bg-[#404040] text-[#9DA5B4]'
+              }`} 
+            >{mode}</button>
+          ))}
         </div>
 
         {/* System prompt button */}
-        <button title="System Prompt" onClick={() => setShowSystemPromptEditor(true)} className="ml-1 px-2 py-0.5 rounded bg-[#313244] hover:bg-[#45475a] transition text-xs">⚙️</button>
-        <button className="px-2 py-0.5 bg-[#313244] hover:bg-[#45475a] rounded text-xs transition" title="New Session">+ New</button>
+        <button title="System Prompt" onClick={() => setShowSystemPromptEditor(true)} className="ml-1 p-0.5 rounded bg-[#3C3C3C] hover:bg-[#404040] transition text-xs">⚙️</button>
+        <button className="px-2 py-0.5 bg-[#3C3C3C] hover:bg-[#404040] rounded text-xs transition cursor-pointer" title="New Session">+ New</button>
       </div>
 
-      {/* Messages area */}
+      {/* Messages area — VS Code style */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 chat-scroll">
         {messages.map((msg) => (
           <ChatMessageItem key={msg.id} message={msg} />
         ))}
 
         {isSending && (
-          <div className="ml-auto max-w-[90%] rounded-lg p-3 bg-[#1e1e2e]/50 border border-[#45475a]">
-            <span className="text-[#a6adc8] text-xs block mb-1">🤖 Agent</span>
+          <div className="ml-auto max-w-[90%] rounded border-l-2 border-[#007ACC] pl-3 py-1 bg-transparent">
+            <span className="text-[#858585] text-xs block mb-1">Agent</span>
             <div className="flex items-center gap-1.5">
               <span className="animate-pulse-slow">●</span>
               <span className="animate-pulse-slow" style={{ animationDelay: '200ms' }}>●</span>
@@ -386,19 +421,19 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
 
       {/* Streaming indicator */}
       {messages.some(m => m.streaming) && (
-        <div className="px-3 py-1 bg-[#181825]/60 border-t border-[#45475a] text-xs flex items-center gap-2">
+        <div className="px-3 py-1 bg-[#181825]/60 border-t border-[#404040] text-xs flex items-center gap-2">
           <span>⏳ Streaming response...</span>
           {typeof window !== 'undefined' && (window as any).tokenSpeed > 0 && (
             <span className="text-green-300">{Math.round((window as any).tokenSpeed)} tok/s</span>
           )}
           <CompressionStatus compressed={compressedHistory} />
-          <button onClick={() => useChatStore.getState().stopStreaming()} className="ml-auto px-2 py-0.5 rounded bg-[#f38ba8]/20 text-[#f38ba8] hover:bg-[#f38ba8]/40 transition" title="Cancel">✕ Cancel</button>
+          <button onClick={() => useChatStore.getState().stopStreaming()} className="ml-auto px-2 py-0.5 rounded bg-[#F44747]/20 text-[#F44747] hover:bg-[#F44747]/40 transition" title="Cancel">✕ Cancel</button>
         </div>
       )}
 
       {/* Context compression status (shown briefly after compression) */}
       {shouldShowCompressionStatus && compressedHistory !== null && (
-        <div className="px-3 py-1 bg-[#f9e2af]/10 border-b border-[#45475a] text-xs flex items-center gap-2 animate-pulse">
+        <div className="px-3 py-1 bg-[#F9E2AF]/10 border-b border-[#404040] text-xs flex items-center gap-2 animate-pulse">
           <span>🧠 Compressing context...</span>
           {compressedHistory.length > 0 && (
             <> — <span className="text-yellow-300">{compressedHistory.length} summary(s) created</span></>
@@ -406,55 +441,75 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
         </div>
       )}
 
-      {/* Input field */}
-      <div className="p-3 border-t border-[#45475a] bg-[#181825]/40">
-        <textarea 
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          placeholder="💬 Type a message..." 
-          rows={3}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          className="w-full resize-none rounded bg-[#1e1e2e] border border-[#45475a] px-3 py-2 text-sm focus:outline-none focus:border-[#cba6f7]" />
+      {/* Input field — VS Code InputBox style */}
+      <div className="border-t border-[#404040] bg-[#181818]/60 px-3 py-2 space-y-2">
+        {/* Mode toggles + model selector */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {['RE', 'PLAN', 'ACT', 'AUDIT'].map((mode) => (
+            <button 
+              key={mode}
+              onClick={() => setActiveMode(mode.toLowerCase())}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
+                activeMode === mode.toLowerCase() ? 'bg-[#007ACC] text-white' : 'bg-[#3C3C3C] text-[#9DA5B4] hover:bg-[#404040]'
+              }`}
+            >{mode}</button>
+          ))}
 
-        <div className="flex items-center gap-2 mt-2">
-          <button 
-            onClick={() => { /* TODO: open file picker */ }}
-            className="px-2.5 py-1 rounded bg-[#313244] hover:bg-[#45475a] text-xs transition" 
-            title="Attach file">📎 Attach</button>
+          <span className="text-[10px] text-[#858585] opacity-50">|</span>
+          
+          {/* Model selector */}
+          <select value={localModel} onChange={(e) => setLocalModel(e.target.value)} className="bg-[#1E1E1E] border border-[#3C3C3C] rounded px-2 py-0.5 text-xs cursor-pointer">
+            <option value="ibm-grok4-1b.Q8_0">ibm-grok4-1b.Q8_0</option>
+            <option value="Qwen3.6-35B-A3B">Qwen3.6-35B-A3B</option>
+          </select>
 
-          {/* Generation parameters - controlled select (Fix #4) */}
+          {/* Generation parameters */}
           <div className="flex items-center gap-2 ml-auto text-xs">
             <select 
               value={localConfig.temperature.toString()} 
               onChange={(e) => handleConfigChange({ ...localConfig, temperature: parseFloat(e.target.value) })}
-              className="bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-1"
+              className="bg-[#1E1E1E] border border-[#3C3C3C] rounded px-2 py-0.5"
             >
               <option value="0.3">T: 0.3</option>
               <option value="0.7">T: 0.7</option>
               <option value="0.9">T: 0.9</option>
               <option value="1.2">T: 1.2</option>
             </select>
-            <span className="opacity-50">|</span>
-            <button 
-              onClick={() => { /* TODO: open full params panel modal */ }}
-              className="px-2 py-1 rounded bg-[#313244] hover:bg-[#45475a] transition text-xs" 
-              title="Open full params panel">⚙ Params</button>
-          </div>
 
-          {/* Send button (disabled while sending) */}
+            {/* Send button */}
+            <button 
+              onClick={handleSend} 
+              disabled={!inputValue.trim() || isSending}
+              className={`px-3 py-0.5 rounded font-semibold text-xs transition ${
+                inputValue.trim() && !isSending ? 'bg-[#007ACC] hover:bg-[#1177CC] text-white' : 'bg-[#3C3C3C] text-[#9DA5B4] opacity-50 cursor-not-allowed'
+              }`}
+            >
+              {isSending ? '⏳ Sending...' : '▶ Send'}
+            </button>
+          </div>
+        </div>
+
+        {/* Input — VS Code InputBox style */}
+        <textarea 
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          placeholder="Type a message..." 
+          rows={3}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          className="w-full resize-none rounded bg-[#1E1E1E] border border-[#3C3C3C] px-2 py-1.5 text-sm focus:outline-none focus:border-[#007ACC]" />
+
+        {/* Attach file button */}
+        <div className="flex items-center gap-2">
           <button 
-            onClick={handleSend} 
-            disabled={!inputValue.trim() || isSending}
-            className={`px-4 py-1 rounded font-semibold text-xs transition ${
-              inputValue.trim() && !isSending ? 'bg-[#cba6f7] hover:bg-[#b4befe] text-black' : 'bg-[#313244] text-[#a6adc8] opacity-50 cursor-not-allowed'
-            }`}>
-            {isSending ? '⏳ Sending...' : '▶ Send'}
-          </button>
+            onClick={() => { /* TODO: open file picker */ }}
+            className="px-2.5 py-1 rounded bg-[#3C3C3C] hover:bg-[#404040] text-xs transition cursor-pointer" 
+            title="Attach file"
+          >📎 Attach</button>
         </div>
       </div>
 
       {/* Token count footer */}
-      <div className="px-3 py-1 bg-[#181825]/60 border-t border-[#45475a] text-xs text-[#a6adc8] opacity-50 flex items-center justify-between">
+      <div className="px-3 py-1 bg-[#181825]/60 border-t border-[#404040] text-xs text-[#858585] opacity-50 flex items-center justify-between">
         <span>~{messages.reduce((sum, m) => sum + m.content.length / 4, 0)} tokens</span>
         <span>{new Date().toLocaleTimeString()}</span>
       </div>
@@ -467,11 +522,13 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
 
 function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'assistant'; content: string; timestamp: number; streaming?: boolean; toolCalls?: Array<{ id: string; type: string; status: string }> } & { generationConfig?: { temperature: number; topP: number } }}) {
   return (
-    <div className={`mb-2 ${message.role === 'user' ? 'ml-auto max-w-[80%]' : 'mr-auto max-w-[90%]'} rounded-lg p-3 text-sm`}>
+    <div className={`mb-2 ${message.role === 'user' ? 'ml-auto max-w-[80%]' : 'mr-auto max-w-[90%]'} border-l-2 pl-3 text-sm ${
+      message.role === 'user' ? 'border-[#007ACC]' : 'border-[#4EC9B0]'
+    }`}>
       {message.role === 'user' ? (
-        <div className="msg-user rounded">
-          <span className="text-[#a6adc8] text-xs block mb-1 flex items-center justify-between">
-            🧑 You
+        <div className="rounded">
+          <span className="text-[#858585] text-xs block mb-1 flex items-center justify-between">
+            You
             <div className="flex gap-1.5">
               {/* Fix #11: Add click handlers to user message action buttons (Issue #11) */}
               <CopyButton content={message.content} />
@@ -480,11 +537,11 @@ function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'a
           {message.content}
         </div>
       ) : (
-        <div className="msg-assistant rounded">
-          <span className="text-[#a6adc8] text-xs block mb-1 flex items-center justify-between">
-            🤖 Agent
+        <div className="rounded">
+          <span className="text-[#858585] text-xs block mb-1 flex items-center justify-between">
+            Agent
             <div className="flex gap-1.5">
-              {message.streaming && <button title="Cancel" onClick={() => useChatStore.getState().stopStreaming()} className="opacity-0 hover:opacity-100 transition-opacity text-xs text-[#f38ba8]">✕</button>}
+              {message.streaming && <button title="Cancel" onClick={() => useChatStore.getState().stopStreaming()} className="opacity-0 hover:opacity-100 transition-opacity text-xs text-[#F44747]">✕</button>}
               <button title="Regenerate" onClick={() => handleRegenerate(message.id)} className="opacity-0 hover:opacity-100 transition-opacity text-xs">🔁</button>
               <CopyButton content={message.content} />
             </div>
@@ -497,8 +554,8 @@ function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'a
           {message.toolCalls && message.toolCalls.length > 0 && (
             <ul className="mt-2 space-y-1">
               {message.toolCalls.map((tc) => (
-                <li key={tc.id} className="rounded bg-[#181825]/60 border border-[#45475a] p-2 text-xs flex items-center gap-2 cursor-pointer hover:border-[#cba6f7]/40 transition">
-                  🔧 {tc.type} — <span className={`${tc.status === 'completed' ? 'text-[#a6e3a1]' : tc.status === 'running' ? 'text-[#f9e2af] animate-pulse-slow' : 'text-[#f38ba8]'}`}>
+                <li key={tc.id} className="rounded bg-[#181825]/60 border border-[#404040] p-2 text-xs flex items-center gap-2 cursor-pointer hover:border-[#007ACC]/40 transition">
+                  🔧 {tc.type} — <span className={`${tc.status === 'completed' ? 'text-[#4EC9B0]' : tc.status === 'running' ? 'text-[#F9E2AF] animate-pulse-slow' : 'text-[#F44747]'}`}>
                     {tc.status}
                   </span>
                 </li>
@@ -517,7 +574,7 @@ function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'a
         </div>
       )}
 
-      <div className="mt-1 text-xs text-[#a6adc8] opacity-50">
+      <div className="mt-1 text-xs text-[#858585] opacity-50">
         {new Date(message.timestamp).toLocaleTimeString()}
       </div>
     </div>
@@ -526,8 +583,9 @@ function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'a
 
 /**
  * Regenerate an agent response by re-sending the user's last message with same generation config.
+ * (P3-B: Now uses real System AI instead of mock streaming text)
  */
-function handleRegenerate(messageId: string): void {
+async function handleRegenerate(messageId: string): Promise<void> {
   const store = useChatStore.getState();
   
   // Find the message to regenerate and get its index in the messages array
@@ -544,55 +602,190 @@ function handleRegenerate(messageId: string): void {
   // Remove the current agent message and any subsequent tool calls
   useChatStore.getState().setMessages(store.messages.slice(0, msgIdx));
   
-  // Start streaming a new response — same pattern as handleSend but without adding a user message first
-  setTimeout(() => {
-    const streamTexts = [
-      `I'll investigate this. Let me read the file first to understand the current implementation.\n\n🔧 Tool: \`read_file\` — completed`,
-      '\n\nI found an issue in the auth middleware.',
-      `\n\nHere's my plan:\n\n1. Update the secret key in \`.env\`\n2. Modify the verification logic to handle rotation\n3. Add a fallback mechanism for graceful degradation`
-    ];
+  // Set sending state — show typing indicator
+  useChatStore.getState().setLoading(true);
+  
+  try {
+    // Assemble turn context with compressed history (same as handleSend)
+    const allMessages = store.messages.slice(0, msgIdx - 1);
+    const globalHistory = useContextStore.getState().compressedHistory;
+    const turnContext = assembleTurnContext(globalHistory, allMessages);
+    
+    // Start streaming response — use real System AI if available
+    setTimeout(async () => {
+      const responseId = `msg-${Date.now()}`;
+      
+      // Create initial empty assistant message for streaming
+      useChatStore.getState().setMessages([
+        ...store.messages.slice(0, msgIdx - 1),
+        { id: responseId, role: 'assistant', content: '', timestamp: Date.now(), streaming: true }
+      ]);
 
-    let currentMsgIdx = 0;
-    let charIdx = 0;
+      try {
+        // Try to get real System AI response
+        let systemClient: any;
+        
+        try {
+          const module = await import('../engine/systemAI');
+          // @ts-ignore — systemAIClient is set globally during app init
+          systemClient = typeof window !== 'undefined' ? (window as any).systemAIClient : null;
+          
+          if (!systemClient || !systemClient.process?.stdin) {
+            throw new Error('System AI not available');
+          }
+        } catch {
+          // System AI not available — fall back to mock streaming text
+          systemClient = null;
+        }
 
+        if (systemClient && prevMessage.content.trim()) {
+          // Real System AI response — stream tokens like handleSend does
+          const fullContext = turnContext.preamble 
+            ? `${turnContext.preamble}\n\n---\nCurrent instruction: ${prevMessage.content}`
+            : prevMessage.content;
+            
+          systemClient.process.stdin.write(`${fullContext}\n`);
+
+          // Listen for streaming tokens (same pattern as handleSend)
+          const tokenSpeedTimer = setInterval(() => {
+            const now = Date.now();
+            const elapsedSeconds = (now - lastTokenTimestamp) / 1000;
+            if (elapsedSeconds > 2) {
+              const storeState = useChatStore.getState();
+              const totalTokens = Math.round(storeState.messages.reduce((sum: number, m: ChatMessage) => 
+                sum + (m.streaming ? m.content.length / 4 : 0), 0) / elapsedSeconds
+              );
+              if (typeof window !== 'undefined') {
+                (window as any).tokenSpeed = totalTokens;
+              }
+            }
+          }, 500);
+
+          // Set up streaming listener — same pattern as handleSend but with real System AI
+          const streamListener = setInterval(() => {
+            if (!systemClient || !systemClient.process?.stdout) return;
+            
+            while (systemClient.process.stdout.readableLength > 0) {
+              const chunk = systemClient.process.stdout.read();
+              if (chunk && Buffer.isBuffer(chunk)) {
+                const text = chunk.toString();
+                // Accumulate tokens into the assistant message content
+                useChatStore.getState().setMessages(store.messages.map((m: ChatMessage) => 
+                  m.id === responseId ? { ...m, content: m.content + text } : m
+                ));
+              }
+            }
+          }, 30);
+
+          // Listen for completion signal from System AI
+          const completeListener = (data: any) => {
+            if (data.type === 'stream_end' || data.completion) {
+              clearInterval(streamListener);
+              clearInterval(tokenSpeedTimer);
+              
+              useChatStore.getState().setMessages(store.messages.map((m: ChatMessage) => 
+                m.id === responseId ? ({ ...m, streaming: false } as ChatMessage) : m
+              ));
+              useChatStore.getState().setLoading(false);
+            }
+          };
+
+          // Listen for error signal from System AI
+          const errorListener = (data: any) => {
+            if (data.type === 'error') {
+              clearInterval(streamListener);
+              clearInterval(tokenSpeedTimer);
+              
+              useChatStore.getState().setMessages(store.messages.map((m: ChatMessage) => 
+                m.id === responseId ? ({ ...m, streaming: false } as ChatMessage & { error?: string }) : m
+              ));
+              useChatStore.getState().setLoading(false);
+            }
+          };
+
+          // Add the listeners — they need to be removed on cleanup
+          const addListeners = () => {
+            systemClient.process?.on('message', completeListener);
+            systemClient.process?.on('error', errorListener);
+            
+            // Auto-cleanup after 5 minutes (safety net)
+            setTimeout(() => {
+              clearInterval(streamListener);
+              clearInterval(tokenSpeedTimer);
+              useChatStore.getState().setLoading(false);
+            }, 300000);
+          };
+
+          addListeners();
+
+        } else {
+          // No System AI available — fall back to mock streaming text (same as before)
+          const streamTexts = [
+            `I'll investigate this. Let me read the file first to understand the current implementation.\n\n🔧 Tool: \`read_file\` — completed`,
+            '\n\nI found an issue in the auth middleware.',
+            `\n\nHere's my plan:\n\n1. Update the secret key in \`.env\`\n2. Modify the verification logic to handle rotation\n3. Add a fallback mechanism for graceful degradation`
+          ];
+
+          let currentMsgIdx = 0;
+          let charIdx = 0;
+
+          const interval = setInterval(() => {
+            if (currentMsgIdx >= streamTexts.length) {
+              clearInterval(interval);
+              useChatStore.setState((s: any) => ({ 
+                isSending: false,
+                messages: s.messages.map((m: ChatMessage) => (m.role === 'assistant' ? { ...m, streaming: false } : m))
+              }));
+              return;
+            }
+
+            const fullText = streamTexts.slice(0, currentMsgIdx + 1).join('');
+            useChatStore.setState((s: any) => ({ 
+              messages: s.messages.map((m: ChatMessage) => m.id === responseId ? { ...m, content: fullText } : m)
+            }));
+
+            // Add tool call card after first chunk arrives (simulates real-time tool execution)
+            if (currentMsgIdx === 0 && charIdx > 5) {
+              useChatStore.setState((s: any) => ({ 
+                messages: s.messages.map((m: ChatMessage) => m.id === responseId ? { ...m, toolCalls: [{ id: 't1', type: 'read_file', status: 'completed' }] } : m)
+              }));
+            }
+
+            charIdx++;
+            if (charIdx >= streamTexts[currentMsgIdx].length) {
+              currentMsgIdx++;
+              charIdx = 0;
+            }
+          }, 15);
+
+          return () => clearInterval(interval);
+        }
+      } catch (err) {
+        console.warn('Regenerate failed:', err);
+        useChatStore.getState().setLoading(false);
+        
+        // Show error in the message (P3-B: include timestamp to satisfy ChatMessage type)
+        const responseId = `msg-${Date.now()}`;
+        useChatStore.getState().setMessages([
+          ...store.messages.slice(0, msgIdx - 1),
+          { id: responseId, role: 'assistant', content: `\n\n❌ Regenerate failed: ${err instanceof Error ? err.message : String(err)}`, timestamp: Date.now(), streaming: false }
+        ]);
+      }
+    }, 600);
+
+  } catch (err) {
+    console.warn('Regenerate context assembly failed:', err);
+    useChatStore.getState().setLoading(false);
+    
+    // Show error in the message (P3-B: include timestamp to satisfy ChatMessage type)
     const responseId = `msg-${Date.now()}`;
-    useChatStore.getState().setMessages([...store.messages, {
-      id: responseId, role: 'assistant' as const, content: '', timestamp: Date.now(), streaming: true, toolCalls: [],
-      generationConfig: generationConfig || getDefaults()
-    }]);
-
-    const interval = setInterval(() => {
-      if (currentMsgIdx >= streamTexts.length) {
-        clearInterval(interval);
-        useChatStore.setState((s: any) => ({ 
-          isSending: false,
-          messages: s.messages.map((m: ChatMessage) => (m.role === 'assistant' ? { ...m, streaming: false } : m))
-        }));
-        return;
-      }
-
-      const fullText = streamTexts.slice(0, currentMsgIdx + 1).join('');
-      useChatStore.setState((s: any) => ({ 
-        messages: s.messages.map((m: ChatMessage) => m.id === responseId ? { ...m, content: fullText } : m)
-      }));
-
-      // Add tool call card after first chunk arrives (simulates real-time tool execution)
-      if (currentMsgIdx === 0 && charIdx > 5) {
-        useChatStore.setState((s: any) => ({ 
-          messages: s.messages.map((m: ChatMessage) => m.id === responseId ? { ...m, toolCalls: [{ id: 't1', type: 'read_file', status: 'completed' }] } : m)
-        }));
-      }
-
-      charIdx++;
-      if (charIdx >= streamTexts[currentMsgIdx].length) {
-        currentMsgIdx++;
-        charIdx = 0;
-      }
-    }, 15);
-
-    return () => clearInterval(interval);
-  }, 600);
+    useChatStore.getState().setMessages([
+      ...store.messages.slice(0, msgIdx - 1),
+      { id: responseId, role: 'assistant', content: `\n\n❌ Regenerate failed: ${err instanceof Error ? err.message : String(err)}`, timestamp: Date.now(), streaming: false }
+    ]);
+  }
 }
+
 
 // Fix #6: System Prompt Editor Modal — controlled by parent via isOpen/onClose props
 function SystemPromptEditor({ isOpen, onClose, onConfigChange }: { isOpen: boolean; onClose: () => void; onConfigChange?: (config: GenerationConfig) => void }) {
@@ -645,18 +838,18 @@ function SystemPromptEditor({ isOpen, onClose, onConfigChange }: { isOpen: boole
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="w-[640px] max-h-[80vh] rounded-lg border border-[#45475a] shadow-xl overflow-hidden flex flex-col">
-        <div className="bg-[#1e1e2e] px-6 py-4 border-b border-[#45475a]">
-          <h3 className="text-sm font-semibold text-[#cdd6f4]">📝 System Prompt Editor</h3>
+      <div className="w-[640px] max-h-[80vh] rounded border border-[#404040] shadow-xl overflow-hidden flex flex-col">
+        <div className="bg-[#1E1E1E] px-6 py-3 border-b border-[#404040]">
+          <h3 className="text-xs font-semibold text-[#CCCCCC] uppercase tracking-wider">System Prompt Editor</h3>
         </div>
 
         {/* Presets — Fix #12: Use getPresetLabel for proper display labels */}
-        <div className="px-6 py-3 border-b border-[#45475a] bg-[#181825]/60 flex gap-2">
+        <div className="px-6 py-2 border-b border-[#404040] bg-[#181825]/60 flex gap-2">
           {Object.keys(PRESETS).map((key) => (
             <button 
               key={key} 
               onClick={() => handleApplyPreset(key)} 
-              className="px-3 py-1 rounded text-xs bg-[#313244] hover:bg-[#45475a] transition"
+              className="px-2 py-0.5 rounded text-[10px] bg-[#3C3C3C] hover:bg-[#404040] transition"
             >
               {getPresetLabel(key)}
             </button>
@@ -668,11 +861,11 @@ function SystemPromptEditor({ isOpen, onClose, onConfigChange }: { isOpen: boole
           value={promptText} 
           onChange={(e) => setPromptText(e.target.value)}
           rows={16}
-          className="flex-1 bg-[#1e1e2e] border-none px-6 py-3 text-sm font-mono focus:outline-none resize-none" />
+          className="flex-1 bg-[#1E1E1E] border-none px-6 py-3 text-xs font-mono focus:outline-none resize-none" />
 
-        <div className="px-6 py-3 bg-[#181825]/60 border-t border-[#45475a] flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-1.5 rounded text-xs hover:bg-[#313244] transition">Cancel</button>
-          <button onClick={handleSave} className="px-3 py-1.5 rounded bg-[#cba6f7] hover:bg-[#b4befe] text-black font-semibold text-xs transition">Save & Apply</button>
+        <div className="px-6 py-2 bg-[#181825]/60 border-t border-[#404040] flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1 rounded text-xs hover:bg-[#3C3C3C] transition">Cancel</button>
+          <button onClick={handleSave} className="px-3 py-1 rounded bg-[#007ACC] hover:bg-[#1177CC] text-white font-semibold text-xs transition">Save & Apply</button>
         </div>
       </div>
     </div>

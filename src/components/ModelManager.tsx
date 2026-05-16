@@ -1,4 +1,4 @@
-// HuggingFace Model Manager — downloader panel + local model browser (Phase B)
+// HuggingFace Model Manager — downloader panel + local model browser (Phase B) — VS Code Dark+ aesthetic
 import React, { useState, useEffect } from 'react';
 import type { HFSession, DownloadProgress, QueuedDownload, HFModelInfo, LocalModelInfo } from '../engine/hfClient';
 
@@ -77,13 +77,13 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
   }
 
   return (
-    <div className="bg-[#1e1e2e] border-l border-[#45475a] flex flex-col w-80">
+    <div className="bg-[#1E1E1E] border-l border-[#404040] flex flex-col w-80">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-[#45475a] bg-[#181825]/60">
+      <div className="px-3 py-2 border-b border-[#404040] bg-[#181818]/60">
         <div className="flex items-center gap-2 mb-2">
-          <h2 className="text-sm font-semibold text-[#a6adc8] uppercase tracking-wider">📦 Model Manager</h2>
+          <h2 className="text-sm font-semibold text-[#858585] uppercase tracking-wider">📦 Model Manager</h2>
           {auth && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-green-900/40 text-green-300 border border-green-700/40">✓ Authenticated</span>
+            <span className="text-xs px-1.5 py-0.5 rounded bg-green-900/40 text-[#4EC9B0] border border-green-700/40">✓ Authenticated</span>
           )}
         </div>
 
@@ -91,13 +91,13 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
         <div className="flex gap-1 mb-2">
           <button
             onClick={() => setActiveTab('local')}
-            className={`px-3 py-1 rounded text-xs transition ${activeTab === 'local' ? 'bg-[#45475a] font-semibold' : 'hover:bg-[#313244]'}`}
+            className={`px-3 py-1 rounded text-xs transition ${activeTab === 'local' ? 'bg-[#404040] font-semibold' : 'hover:bg-[#3C3C3C]'}`}
           >
             Local Models
           </button>
           <button
             onClick={() => setActiveTab('huggingface')}
-            className={`px-3 py-1 rounded text-xs transition ${activeTab === 'huggingface' ? 'bg-[#45475a] font-semibold' : 'hover:bg-[#313244]'}`}
+            className={`px-3 py-1 rounded text-xs transition ${activeTab === 'huggingface' ? 'bg-[#404040] font-semibold' : 'hover:bg-[#3C3C3C]'}`}
           >
             HuggingFace
           </button>
@@ -110,12 +110,12 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
             placeholder="Search GGUF models..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-[#1e1e2e] border border-[#45475a] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[#cba6f7]"
+            className="w-full bg-[#1E1E1E] border border-[#404040] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[#007ACC]"
           />
         )}
 
         {/* Auth button */}
-        <button onClick={() => setShowAuthDialog(true)} className="w-full mt-2 px-2.5 py-1 rounded bg-[#313244] hover:bg-[#45475a] text-xs transition">
+        <button onClick={() => setShowAuthDialog(true)} className="w-full mt-2 px-2.5 py-1 rounded bg-[#3C3C3C] hover:bg-[#404040] text-xs transition">
           {auth ? '🔄 Refresh Auth' : '🔐 Login'}
         </button>
       </div>
@@ -135,7 +135,7 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
               />
             ))}
             {localModels.length === 0 && (
-              <div className="text-sm text-[#a6adc8] opacity-70">No local models found. Download from HuggingFace tab.</div>
+              <div className="text-sm text-[#858585] opacity-70">No local models found. Download from HuggingFace tab.</div>
             )}
           </>
         )}
@@ -152,7 +152,7 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
               />
             ))}
             {searchQuery && hfModels.length === 0 && (
-              <div className="text-sm text-[#a6adc8] opacity-70">No models found for "{searchQuery}". Try a different search term.</div>
+              <div className="text-sm text-[#858585] opacity-70">No models found for "{searchQuery}". Try a different search term.</div>
             )}
           </>
         )}
@@ -160,8 +160,8 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
 
       {/* Download Queue */}
       {downloadQueue.length > 0 && (
-        <div className="border-t border-[#45475a] p-3 bg-[#181825]/60">
-          <h3 className="text-xs font-semibold text-[#a6adc8] uppercase tracking-wider mb-2">Download Queue</h3>
+        <div className="border-t border-[#404040] p-3 bg-[#181818]/60">
+          <h3 className="text-xs font-semibold text-[#858585] uppercase tracking-wider mb-2">Download Queue</h3>
           {downloadQueue.map((dl) => (
             <div key={dl.id} className="mb-2">
               <div className="flex items-center justify-between text-xs mb-1">
@@ -169,7 +169,7 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
                 <span className="opacity-70">{Math.round(dl.progress.downloadedBytes / 1048576 * 10) / 10} MB</span>
               </div>
               {downloadQueue.length > 1 && (
-                <button className="text-xs text-[#f38ba8] hover:text-pink-300 transition">✕</button>
+                <button className="text-xs text-[#F44747] hover:text-pink-300 transition">✕</button>
               )}
             </div>
           ))}
@@ -203,17 +203,17 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettin
 
   if (hf) {
     return (
-      <div className="rounded bg-[#1e1e2e]/60 border border-[#45475a] p-3 hover:border-[#cba6f7]/40 transition cursor-pointer">
+      <div className="rounded bg-[#1E1E1E]/60 border border-[#404040] p-3 hover:border-[#007ACC]/40 transition cursor-pointer">
         <div className="flex items-center justify-between mb-1">
           <span className="text-sm font-medium">📁 {hf.id.split('/').pop() || 'Unknown'}</span>
-          {isCurrent && <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 border border-indigo-700/40">✓ Loaded</span>}
+          {isCurrent && <span className="text-xs px-1.5 py-0.5 rounded bg-[#007ACC]/20 text-[#569CD6] border border-[#007ACC]/40">✓ Loaded</span>}
         </div>
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs opacity-60">GGUF • Q8_0 • 1.9 GB</span>
           <button 
             onClick={() => onHFSelect?.(hf.id)} 
             disabled={isDownloading}
-            className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#f9e2af]/30 text-[#a67c5b]' : 'bg-[#cba6f7] hover:bg-[#b4befe] text-black'}`}
+            className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#DCDCAA]/30 text-[#DCDCAA]' : 'bg-[#007ACC] hover:bg-[#1177BB] text-white'}`}
           >
             {isDownloading ? '⬇ Downloading...' : '▶ Download'}
           </button>
@@ -223,7 +223,7 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettin
   }
 
   return (
-    <div className={`rounded bg-[#1e1e2e]/60 border p-3 ${isCurrent ? 'border-indigo-500/40' : 'border-[#45475a]'}`}>
+    <div className={`rounded bg-[#1E1E1E]/60 border p-3 ${isCurrent ? 'border-[#007ACC]/40' : 'border-[#404040]'}`}>
       {/* Header row */}
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm font-medium">{model?.name}</span>
@@ -232,7 +232,7 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettin
           {/* Settings toggle button — opens inline settings panel */}
           <button 
             onClick={() => openSettingsPanel?.()}
-            className="px-1.5 py-0.5 rounded bg-[#313244] hover:bg-[#45475a] text-xs transition"
+            className="px-1.5 py-0.5 rounded bg-[#3C3C3C] hover:bg-[#404040] text-xs transition"
             title="Model settings (context window, GPU layers, threads)"
           >
             ⚙️
@@ -242,8 +242,8 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettin
 
       {/* Inline per-model settings panel (Phase F-1) */}
       {settingsOpen && model && (
-        <div className="mb-2 p-2 bg-[#181825]/60 border border-[#45475a] rounded">
-          <p className="text-xs text-[#a6adc8] mb-2 font-semibold">Model Settings</p>
+        <div className="mb-2 p-2 bg-[#181818]/60 border border-[#404040] rounded">
+          <p className="text-xs text-[#858585] mb-2 font-semibold">Model Settings</p>
           
           {/* Context Window */}
           <div className="flex items-center justify-between mb-1.5">
@@ -254,7 +254,7 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettin
               onChange={(e) => setContextWindow(parseInt(e.target.value) || 0)} 
               placeholder="Auto-detect" 
               min="0" 
-              className="w-24 bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[#cba6f7]"
+              className="w-24 bg-[#1E1E1E] border border-[#404040] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[#007ACC]"
             />
           </div>
 
@@ -268,7 +268,7 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettin
               placeholder="-1 = All" 
               min="-1" 
               max="999" 
-              className="w-24 bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[#cba6f7]"
+              className="w-24 bg-[#1E1E1E] border border-[#404040] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[#007ACC]"
             />
           </div>
 
@@ -282,14 +282,14 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettin
               placeholder="-1 = Auto" 
               min="-1" 
               max="999" 
-              className="w-24 bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[#cba6f7]"
+              className="w-24 bg-[#1E1E1E] border border-[#404040] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[#007ACC]"
             />
           </div>
 
           {/* Reset button */}
           <button 
             onClick={() => { setContextWindow(0); setGpuLayers(-1); setThreads(-1); }}
-            className="mt-2 text-xs text-[#f38ba8] hover:text-pink-300 transition"
+            className="mt-2 text-xs text-[#F44747] hover:text-pink-300 transition"
           >
             Reset to defaults
           </button>
@@ -301,7 +301,7 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettin
         <span className="text-xs opacity-60">{model?.sizeMB} MB • GGUF</span>
         <div className="flex gap-1.5">
           {!isCurrent && (
-            <button onClick={() => onModelSelect?.(model!.name)} className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#f9e2af]/30' : 'bg-[#cba6f7] hover:bg-[#b4befe] text-black'}`}>
+            <button onClick={() => onModelSelect?.(model!.name)} className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#DCDCAA]/30' : 'bg-[#007ACC] hover:bg-[#1177BB] text-white'}`}>
               ▶ Load
             </button>
           )}
@@ -318,27 +318,27 @@ function AuthDialog({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onDone}>
-      <div className="w-[480px] rounded-lg border border-[#45475a] shadow-xl overflow-hidden">
+      <div className="w-[480px] rounded-lg border border-[#404040] shadow-xl overflow-hidden">
         {/* Header */}
-        <div className="bg-[#1e1e2e] px-6 py-4 border-b border-[#45475a] flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[#cdd6f4]">🔐 HuggingFace Authentication</h3>
-          <button onClick={onDone} className="px-2 py-1 rounded hover:bg-[#313244] transition">✕</button>
+        <div className="bg-[#1E1E1E] px-6 py-4 border-b border-[#404040] flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[#D4D4D4]">🔐 HuggingFace Authentication</h3>
+          <button onClick={onDone} className="px-2 py-1 rounded hover:bg-[#3C3C3C] transition">✕</button>
         </div>
 
         {/* Method selection */}
-        <div className="bg-[#1e1e2e]/80 px-6 py-3 border-b border-[#45475a] flex gap-3">
-          <button onClick={() => setActiveMethod('token')} className={`px-3 py-1 rounded text-xs font-medium transition ${activeMethod === 'token' ? 'bg-[#cba6f7]/20 text-[#cba6f7]' : 'text-[#a6adc8] hover:bg-[#313244]'}`}>Token</button>
-          <button onClick={() => setActiveMethod('browser')} className={`px-3 py-1 rounded text-xs font-medium transition ${activeMethod === 'browser' ? 'bg-[#cba6f7]/20 text-[#cba6f7]' : 'text-[#a6adc8] hover:bg-[#313244]'}`}>Browser</button>
-          <button onClick={() => setActiveMethod('cli')} className={`px-3 py-1 rounded text-xs font-medium transition ${activeMethod === 'cli' ? 'bg-[#cba6f7]/20 text-[#cba6f7]' : 'text-[#a6adc8] hover:bg-[#313244]'}`}>CLI</button>
+        <div className="bg-[#1E1E1E]/80 px-6 py-3 border-b border-[#404040] flex gap-3">
+          <button onClick={() => setActiveMethod('token')} className={`px-3 py-1 rounded text-xs font-medium transition ${activeMethod === 'token' ? 'bg-[#007ACC]/20 text-[#007ACC]' : 'text-[#858585] hover:bg-[#3C3C3C]'}`}>Token</button>
+          <button onClick={() => setActiveMethod('browser')} className={`px-3 py-1 rounded text-xs font-medium transition ${activeMethod === 'browser' ? 'bg-[#007ACC]/20 text-[#007ACC]' : 'text-[#858585] hover:bg-[#3C3C3C]'}`}>Browser</button>
+          <button onClick={() => setActiveMethod('cli')} className={`px-3 py-1 rounded text-xs font-medium transition ${activeMethod === 'cli' ? 'bg-[#007ACC]/20 text-[#007ACC]' : 'text-[#858585] hover:bg-[#3C3C3C]'}`}>CLI</button>
         </div>
 
         {/* Content */}
         <div className="px-6 py-4">
           {activeMethod === 'token' && (
             <div className="space-y-3">
-              <p className="text-xs text-[#a6adc8]">Open huggingface.co/settings/tokens in your browser and paste a new access token:</p>
-              <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="hf_••••••••••••••••" className="w-full bg-[#181825] border border-[#45475a] rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#cba6f7]" />
-              <button onClick={async () => { setStatus('authenticating'); await new Promise(r => setTimeout(r, 1000)); setStatus('success'); }} className="w-full px-4 py-2 rounded bg-[#cba6f7] hover:bg-[#b4befe] text-black font-semibold text-sm transition">
+              <p className="text-xs text-[#858585]">Open huggingface.co/settings/tokens in your browser and paste a new access token:</p>
+              <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="hf_••••••••••••••••" className="w-full bg-[#181818] border border-[#404040] rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#007ACC]" />
+              <button onClick={async () => { setStatus('authenticating'); await new Promise(r => setTimeout(r, 1000)); setStatus('success'); }} className="w-full px-4 py-2 rounded bg-[#007ACC] hover:bg-[#1177BB] text-white font-semibold text-sm transition">
                 Authenticate
               </button>
             </div>
@@ -346,26 +346,26 @@ function AuthDialog({ onDone }: { onDone: () => void }) {
 
           {activeMethod === 'browser' && (
             <div className="space-y-3">
-              <p className="text-xs text-[#a6adc8]">Click below to open HuggingFace settings in your browser:</p>
-              <button onClick={() => window.open('https://huggingface.co/settings/tokens')} className="px-4 py-2 rounded bg-[#313244] hover:bg-[#45475a] text-sm transition">Open Settings</button>
+              <p className="text-xs text-[#858585]">Click below to open HuggingFace settings in your browser:</p>
+              <button onClick={() => window.open('https://huggingface.co/settings/tokens')} className="px-4 py-2 rounded bg-[#3C3C3C] hover:bg-[#404040] text-sm transition">Open Settings</button>
             </div>
           )}
 
           {activeMethod === 'cli' && (
             <div className="space-y-3">
-              <p className="text-xs text-[#a6adc8]">Run this command in the terminal:</p>
-              <code className="block bg-[#181825] border border-[#45475a] rounded px-3 py-2 text-sm font-mono">huggingface-cli login</code>
+              <p className="text-xs text-[#858585]">Run this command in the terminal:</p>
+              <code className="block bg-[#181818] border border-[#404040] rounded px-3 py-2 text-sm font-mono">huggingface-cli login</code>
             </div>
           )}
 
           {status === 'success' && (
-            <div className="mt-3 p-3 rounded bg-green-900/20 border border-green-700/40 text-xs text-green-300">Authenticated as @your_username ✓</div>
+            <div className="mt-3 p-3 rounded bg-green-900/20 border border-green-700/40 text-xs text-[#4EC9B0]">Authenticated as @your_username ✓</div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 bg-[#181825]/60 border-t border-[#45475a] flex justify-end gap-2">
-          <button onClick={onDone} className="px-3 py-1.5 rounded text-xs hover:bg-[#313244] transition">Cancel</button>
+        <div className="px-6 py-3 bg-[#181818]/60 border-t border-[#404040] flex justify-end gap-2">
+          <button onClick={onDone} className="px-3 py-1.5 rounded text-xs hover:bg-[#3C3C3C] transition">Cancel</button>
         </div>
       </div>
     </div>

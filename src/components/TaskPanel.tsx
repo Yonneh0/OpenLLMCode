@@ -1,4 +1,4 @@
-// TaskPanel — displays the current task plan with step statuses and progress
+// TaskPanel — displays the current task plan with step statuses and progress (VS Code Dark+ aesthetic)
 import { useTaskStore, getStatusLabel, getStepStatusIcon } from '../store/taskStore';
 import React, { useCallback } from 'react';
 
@@ -23,23 +23,23 @@ const TaskPanel: React.FC = () => {
   const progressPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
 
   return (
-    <div className="px-3 py-2 border-t border-[#45475a] space-y-2">
+    <div className="px-3 py-2 border-t border-[#404040] space-y-2">
       {/* Task header */}
       <div>
-        <h3 className="text-sm font-semibold text-[#cdd6f4]">{currentTask.title}</h3>
-        <p className="text-xs text-[#6c7086] mt-0.5">{getStatusLabel(currentTask.status)}</p>
+        <h3 className="text-xs font-semibold text-[#CCCCCC]">{currentTask.title}</h3>
+        <p className="text-[11px] text-[#858585] mt-0.5">{getStatusLabel(currentTask.status)}</p>
       </div>
 
-      {/* Progress bar */}
+      {/* Progress bar — thin VS Code style */}
       {totalSteps > 0 && (
         <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs text-[#a6adc8]">
+          <div className="flex items-center justify-between text-[11px] text-[#858585]">
             <span>{completedSteps}/{totalSteps} steps</span>
             <span>{progressPct}%</span>
           </div>
-          <div className="w-full h-1.5 bg-[#1e1e2e] rounded-full overflow-hidden">
+          <div className="w-full h-0.5 bg-[#1E1E1E] rounded overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-[#89b4fa] to-[#a6e3a1] transition-all duration-300"
+              className="h-full bg-[#007ACC]"
               style={{ width: `${progressPct}%` }}
             />
           </div>
@@ -57,7 +57,7 @@ const TaskPanel: React.FC = () => {
 
        {/* Completion summary + squash button */}
        {currentTask.status === 'completed' && currentTask.completionSummary && (
-         <div className="bg-[#a6e3a1]/10 border border-[#a6e3a1]/20 rounded-lg px-3 py-2 text-xs text-[#a6e3a1]">
+         <div className="bg-[#4EC9B0]/10 border border-[#4EC9B0]/20 rounded px-3 py-1.5 text-[11px] text-[#4EC9B0]">
            ✅ {currentTask.completionSummary}
          </div>
        )}
@@ -66,7 +66,7 @@ const TaskPanel: React.FC = () => {
        {currentTask.status === 'completed' && !currentTask.completionSummary && (
          <button
            onClick={handleSquash}
-           className="w-full px-3 py-1.5 bg-[#89b4fa]/20 hover:bg-[#89b4fa]/30 text-[#89b4fa] rounded-lg text-xs font-medium transition-colors"
+           className="w-full px-3 py-1.5 bg-[#007ACC]/20 hover:bg-[#007ACC]/30 text-[#007ACC] rounded text-[11px] font-medium transition-colors"
          >
            🔧 Squash Task Commits
          </button>
@@ -74,7 +74,7 @@ const TaskPanel: React.FC = () => {
 
        {/* Failed state */}
       {currentTask.status === 'failed' && (
-        <div className="bg-[#f38ba8]/10 border border-[#f38ba8]/20 rounded-lg px-3 py-2 text-xs text-[#f38ba8]">
+        <div className="bg-[#F44747]/10 border border-[#F44747]/20 rounded px-3 py-1.5 text-[11px] text-[#F44747]">
           ❌ Task failed. Check the chat for details.
         </div>
       )}
@@ -92,16 +92,16 @@ const PlanStepItem: React.FC<PlanStepItemProps> = ({ step }) => {
   const icon = getStepStatusIcon(step.status as any);
 
   return (
-    <div className="flex items-start gap-2 text-xs">
+    <div className="flex items-start gap-2 text-[11px]">
       <span className="mt-0.5 flex-shrink-0">{icon}</span>
-      <span className={`flex-1 ${step.status === 'completed' ? 'text-[#6c7086] line-through' : step.status === 'executing' ? 'text-[#f9e2af]' : 'text-[#a6adc8]'}`}>
+      <span className={`flex-1 ${step.status === 'completed' ? 'text-[#858585] line-through' : step.status === 'executing' ? 'text-[#DCDCAA]' : 'text-[#858585]'}`}>
         {step.description}
       </span>
       {/* Tools required badges */}
       {step.toolsRequired && step.toolsRequired.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {step.toolsRequired.map((tool) => (
-            <span key={tool} className="text-[10px] bg-[#45475a]/50 text-[#6c7086] px-1 py-0.5 rounded font-mono">
+            <span key={tool} className="text-[9px] bg-[#404040]/50 text-[#858585] px-1 py-0.5 rounded font-mono">
               {tool}
             </span>
           ))}

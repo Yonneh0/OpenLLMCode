@@ -11,6 +11,13 @@ interface TerminalSession {
   container: HTMLDivElement;
 }
 
+// VS Code bottom panel tabs (like VS Code's Problems | Output | Debug Console | Terminal)
+const PANEL_TABS = [
+  { id: 'terminal', label: 'Terminal' },
+  { id: 'problems', label: 'Problems' },
+  { id: 'output', label: 'Output' },
+] as const;
+
 export const XTermTerminal: React.FC = () => {
    const containerRef = useRef<HTMLDivElement>(null);
    const sessionsRef = useRef<Map<string, TerminalSession>>(new Map());
@@ -37,26 +44,26 @@ export const XTermTerminal: React.FC = () => {
         fontSize: 14,
         fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
         theme: {
-          background: '#1E1E2E',
-          foreground: '#CDD6F4',
-          cursor: '#F5E0DC',
-          selectionBackground: '#585B7044',
-          black: '#45475A',
-          red: '#F38BA8',
-          green: '#A6E3A1',
-          yellow: '#F9E2AF',
-          blue: '#89B4FA',
-          magenta: '#CBA6F7',
-          cyan: '#89DCEB',
-          white: '#BAC2DE',
-          brightBlack: '#585B70',
-          brightRed: '#F38BA8',
-          brightGreen: '#A6E3A1',
-          brightYellow: '#F9E2AF',
-          brightBlue: '#89B4FA',
-          brightMagenta: '#CBA6F7',
-          brightCyan: '#89DCEB',
-          brightWhite: '#A6ADC8',
+          background: '#1E1E1E',
+          foreground: '#D4D4D4',
+          cursor: '#F8F8F2',
+          selectionBackground: '#264F78',
+          black: '#3C3C3C',
+          red: '#F44747',
+          green: '#4EC9B0',
+          yellow: '#DCDCAA',
+          blue: '#569CD6',
+          magenta: '#C586C0',
+          cyan: '#4FC1FF',
+          white: '#CCCCCC',
+          brightBlack: '#606B79',
+          brightRed: '#F44747',
+          brightGreen: '#4EC9B0',
+          brightYellow: '#DCDCAA',
+          brightBlue: '#569CD6',
+          brightMagenta: '#C586C0',
+          brightCyan: '#4FC1FF',
+          brightWhite: '#CCCCCC',
         },
       });
 
@@ -135,7 +142,7 @@ export const XTermTerminal: React.FC = () => {
     if (activeIdRef.current === id && remaining.length > 0) {
       switchSession(remaining[0].id);
     }
-  }, [switchSession]);
+   }, [switchSession]);
 
   // Initialize default terminal on mount
   useEffect(() => {
@@ -177,23 +184,35 @@ export const XTermTerminal: React.FC = () => {
   }, [activeId, switchSession]);
 
   return (
-    <div className="flex flex-col h-full bg-[#1e1e2e]">
-      {/* Terminal tab bar */}
-      <div className="flex items-center bg-[#181825] border-b border-[#313244] px-2">
+    <div className="flex flex-col h-full bg-[#1E1E1E]">
+      {/* Terminal tab bar — VS Code bottom panel style */}
+      <div className="flex items-center bg-[#1E1E1E] border-t border-b border-[#2B2B2B] px-3 text-xs font-semibold uppercase tracking-wider gap-6">
+        {PANEL_TABS.map((tab) => (
+          <span
+            key={tab.id}
+            className={`py-2 cursor-pointer -mb-px transition-colors ${
+              activeId === tab.id ? 'text-[#CCCCCC] border-b-2 border-[#007ACC]' : 'text-[#858585] hover:text-[#CCCCCC]'
+            }`}
+          >
+            {tab.label}
+          </span>
+        ))}
+
+        {/* Terminal session tabs within Terminal tab */}
+        <div className="flex-1" />
         {sessions.map((s) => (
           <div
             key={s.id}
             className={`
-              flex items-center gap-1.5 px-3 py-1 text-sm cursor-pointer select-none border-r border-[#313244]
-              ${s.id === activeId ? 'bg-[#1e1e2e] text-[#cdd6f4]' : 'text-[#6c7086] hover:bg-[#1e1e2e]'}
+              flex items-center gap-1.5 px-2 py-0.5 text-[11px] cursor-pointer select-none border-r border-[#3C3C3C]/50
+              ${s.id === activeId ? 'text-white' : 'text-[#858585] hover:text-[#CCCCCC]'}
             `}
             onClick={() => switchSession(s.id)}
           >
-            <span>⬛</span>
             <span>{s.label}</span>
             {sessions.length > 1 && (
               <button
-                className="p-0.5 rounded hover:bg-[#45475a] text-[#6c7086] hover:text-[#cdd6f4]"
+                className="p-0.5 rounded hover:bg-[#404040] text-[#858585] hover:text-white"
                 onClick={(e) => {
                   e.stopPropagation();
                   closeSession(s.id);
@@ -207,7 +226,7 @@ export const XTermTerminal: React.FC = () => {
 
         {/* New terminal button */}
         <button
-          className="p-1 text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] rounded ml-1"
+          className="p-1 text-[#858585] hover:text-white hover:bg-[#404040] rounded"
           onClick={() => {
             const id = `term-${Date.now()}`;
             createSession(id, `Terminal ${sessions.length + 1}`);

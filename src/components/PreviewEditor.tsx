@@ -23,7 +23,7 @@ function ImageViewer({ src, filename }: { src: string; filename: string }) {
   
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full text-[#6c7086]">
+      <div className="flex items-center justify-center h-full text-[#858585]">
         <div className="text-center space-y-2">
           <div className="text-4xl">🖼️</div>
           <p className="text-sm">Failed to load image preview</p>
@@ -33,7 +33,7 @@ function ImageViewer({ src, filename }: { src: string; filename: string }) {
   }
 
   return (
-    <div className="flex items-center justify-center h-full bg-[#1e1e2e] overflow-auto p-4">
+    <div className="flex items-center justify-center h-full bg-[#1E1E1E] overflow-auto p-4">
       <img 
         src={src} 
         alt={filename} 
@@ -49,16 +49,16 @@ function PdfViewer({ src, filename }: { src: string; filename: string }) {
   const [error, setError] = React.useState(false);
   
   if (error) {
-    return (
-      <div className="flex items-center justify-center h-full text-[#6c7086]">
-        <div className="text-center space-y-2">
-          <div className="text-4xl">📄</div>
-          <p className="text-sm">Failed to load PDF preview — download instead</p>
-          <a 
-            href={src} 
-            download={filename}
-            className="inline-block px-3 py-1.5 rounded bg-[#cba6f7] hover:bg-[#b4befe] text-black text-xs font-semibold transition"
-          >
+      return (
+        <div className="flex items-center justify-center h-full text-[#858585]">
+          <div className="text-center space-y-2">
+            <div className="text-4xl">📄</div>
+            <p className="text-sm">Failed to load PDF preview — download instead</p>
+            <a 
+              href={src} 
+              download={filename}
+              className="inline-block px-3 py-1.5 rounded bg-[#007ACC]/20 hover:bg-[#007ACC]/30 text-[#007ACC] text-xs font-semibold transition"
+            >
             Download PDF
           </a>
         </div>
@@ -79,7 +79,7 @@ function PdfViewer({ src, filename }: { src: string; filename: string }) {
 // Text preview component — renders plain text files in a simple editor-like view
 function TextViewer({ content, filename }: { content: string; filename: string }) {
   return (
-    <div className="h-full bg-[#1e1e2e] overflow-auto">
+    <div className="h-full bg-[#1E1E1E] overflow-auto">
       <pre className="p-4 font-mono text-sm whitespace-pre-wrap">{content}</pre>
     </div>
   );
@@ -102,7 +102,7 @@ export const PreviewEditor: React.FC<PreviewEditorProps> = ({ uri, content, src 
   // No preview available — show fallback message
   if (!previewType) {
     return (
-      <div className="flex items-center justify-center h-full text-[#6c7086]">
+      <div className="flex items-center justify-center h-full text-[#858585]">
         <div className="text-center space-y-2">
           <div className="text-4xl">📄</div>
           <p className="text-sm">No preview available for this file type</p>

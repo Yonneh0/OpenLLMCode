@@ -1,6 +1,11 @@
 // Pingu Avatar — System AI mascot in the corner of the UI (Phase G-2)
 import React, { useEffect, useRef, useCallback } from 'react';
-import { usePinguStore, startBlinkTimer, stopBlinkTimer } from '../store/pinguStore';
+import { usePinguStore, startBlinkTimer, stopBlinkTimer, type PinguPanelType } from '../store/pinguStore';
+
+// Import real panel components from PinguPanel (P1-B: Pingu menu item actions)
+// Note: PinguMenu is imported directly since it's the main component that renders all panels
+import { SkillPanel, SettingsPanel, ModelsPanel, CompilePanel, LogsPanel, AboutPanel } from './PinguPanel';
+
 
 interface PinguAvatarProps {
   position?: 'bottom-right' | 'top-right';
@@ -318,6 +323,7 @@ export function PinguAvatar({ position = 'bottom-right' }: PinguAvatarProps) {
         <PinguMenu onClose={usePinguStore.getState().closeMenu} />
       )}
 
+
       {/* Inline styles for custom animations not in Tailwind config */}
       <style>{`
         @keyframes bob-50 {
@@ -374,7 +380,7 @@ function PinguMenu({ onClose }: { onClose: () => void }) {
   const models = []; // Would be loaded from ModelManager store
   
   return (
-    <div className="fixed bottom-20 right-4 z-50 w-64">
+    <div className="fixed bottom-20 right-4 z-50 w-[360px]">
       {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-transparent" 
@@ -404,35 +410,35 @@ function PinguMenu({ onClose }: { onClose: () => void }) {
             icon="🛠️" 
             label="Agent Skills" 
             subtitle="Manage task extensions"
-            onClick={() => console.log('Open skills panel')}
+            onClick={() => usePinguStore.getState().togglePanel('skills')}
           />
           
           <MenuButton 
             icon="⚙️" 
             label="Settings" 
             subtitle="Engine, models, auth config"
-            onClick={() => console.log('Open settings')}
+            onClick={() => usePinguStore.getState().togglePanel('settings')}
           />
           
           <MenuButton 
             icon="📦" 
             label="Manage Models" 
             subtitle={`${models.length} local + HuggingFace`}
-            onClick={() => console.log('Open model manager')}
+            onClick={() => usePinguStore.getState().togglePanel('models')}
           />
           
           <MenuButton 
             icon="🔧" 
             label="Compile Engine" 
             subtitle="llama.cpp build status"
-            onClick={() => console.log('Show compile status')}
+            onClick={() => usePinguStore.getState().togglePanel('compile')}
           />
           
           <MenuButton 
             icon="📋" 
             label="Activity Log" 
             subtitle="System AI activity log"
-            onClick={() => console.log('Open activity log')}
+            onClick={() => usePinguStore.getState().togglePanel('logs')}
           />
           
           <div className="border-t border-[#45475a] my-1.5" />
@@ -470,7 +476,7 @@ function PinguMenu({ onClose }: { onClose: () => void }) {
 
           {/* About button */}
           <button 
-            onClick={() => console.log('Show about dialog')}
+            onClick={() => usePinguStore.getState().togglePanel('about')}
             className="w-full px-2 py-1.5 rounded text-xs bg-[#313244] hover:bg-[#45475a] transition text-left"
           >
             About Pingu — Fun facts! 🐧
@@ -486,7 +492,27 @@ function PinguMenu({ onClose }: { onClose: () => void }) {
             Close
           </button>
         </div>
+
+        {/* Panel overlay — rendered based on activePanel state */}
+        {usePinguStore.getState().activePanel && (
+          <div className="absolute bottom-full right-0 mb-2 w-[480px] rounded-lg border border-[#45475a] shadow-xl overflow-hidden bg-[#1e1e2e] z-50">
+            {usePinguStore.getState().activePanel === 'skills' && <SkillPanel onClose={onClose} />}
+            {usePinguStore.getState().activePanel === 'settings' && <SettingsPanel onClose={onClose} />}
+            {usePinguStore.getState().activePanel === 'models' && <ModelsPanel onClose={onClose} />}
+            {usePinguStore.getState().activePanel === 'compile' && <CompilePanel onClose={onClose} />}
+            {usePinguStore.getState().activePanel === 'logs' && <LogsPanel onClose={onClose} />}
+            {usePinguStore.getState().activePanel === 'about' && <AboutPanel onClose={onClose} />}
+          </div>
+        )}
       </div>
+
+      <style>{`
+        @keyframes pulse-slow {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
+        .animate-pulse-slow { animation: pulse-slow 2s ease-in-out infinite; }
+      `}</style>
     </div>
   );
 }

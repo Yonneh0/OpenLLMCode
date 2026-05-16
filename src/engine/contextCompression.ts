@@ -242,6 +242,47 @@ export function generateFullContext(
   return { preamble, activeMessages: mappedMessages };
 }
 
+// ─── Context assembly for System AI injection ──────────────
+
+/**
+ * Get the full context preamble for the current turn.
+ * This combines compressed history with the active window, producing a text preamble
+ * that can be injected as part of the system prompt before any user message.
+ */
+export function getFullContextPreamble(
+  compressedHistory: CompressedEntry[],
+): string | null {
+  if (compressedHistory.length === 0) return null;
+  
+  return `Earlier conversation summary:\n${compressedHistory.map(e => 
+    `- ${e.summary}\n  Decisions: ${e.keyDecisions.join('; ')}\n  Files modified: ${e.filesModified.join(', ')}\n`
+).join('\n')}`;
+}
+
+/**
+ * Assemble the complete context for a given turn.
+ * Returns both the preamble text (for system prompt injection) and the active messages
+ * that should be included in the message history for this turn.
+ */
+export function assembleTurnContext(
+  compressedHistory: CompressedEntry[],
+  allMessages: Array<{ id: string; role: string; content: string }>,
+): { 
+  preamble: string | null;
+  activeMessages: Array<{ role: string; content: string }>;
+} {
+  const activeWindow = getActiveWindow(allMessages, compressedHistory);
+  const preamble = getFullContextPreamble(compressedHistory);
+  
+  // Map active window to LLM-compatible format (role/content)
+  const mappedActiveMessages: Array<{ role: string; content: string }> = activeWindow.map(m => ({
+    role: m.role === 'user' ? 'user' as const : 'assistant' as const,
+    content: m.content,
+  }));
+  
+  return { preamble, activeMessages: mappedActiveMessages };
+}
+
 // Check if compression should be triggered (without actually doing it)
 export function shouldCompress(
   messages: Array<{ id: string; role: string; content: string }>,

@@ -3,6 +3,9 @@ import { create } from 'zustand';
 
 export type PinguMood = 'idle' | 'thinking' | 'speaking' | 'happy' | 'error' | 'working';
 
+/** Types of panels that can be shown in the Pingu menu overlay (P1-B: Added 'about') */
+export type PinguPanelType = 'skills' | 'settings' | 'models' | 'compile' | 'logs' | 'about' | null;
+
 interface PinguState {
   // Current mood — drives all visual behavior
   mood: PinguMood;
@@ -12,6 +15,9 @@ interface PinguState {
   
   // Whether the menu panel is open when clicking Pingu
   isMenuOpen: boolean;
+  
+  // Which panel is currently active inside the Pingu overlay (null = no panel shown)
+  activePanel: PinguPanelType;
   
   // Cursor position for eye-following animation (in component-relative coordinates, -1 to 1)
   mouseX: number;
@@ -30,9 +36,14 @@ interface PinguState {
   setMood: (mood: PinguMood) => void;
   resetMood: () => void;
   
-  // Actions — menu toggle
-  toggleMenu: () => void;
-  closeMenu: () => void;
+   // Actions — menu toggle
+   toggleMenu: () => void;
+   closeMenu: () => void;
+   
+   // Actions — panel management
+   openPanel: (panel: PinguPanelType) => void;
+   togglePanel: (panel: PinguPanelType) => void;
+   closePanel: () => void;
   
   // Actions — visibility control
   showPingu: () => void;
@@ -51,6 +62,7 @@ export const usePinguStore = create<PinguState>((set, get) => ({
   mood: 'idle',
   isVisible: true,
   isMenuOpen: false,
+  activePanel: null as PinguPanelType,
   mouseX: 0,
   mouseY: 0,
   mouthFrame: 0,
@@ -86,7 +98,27 @@ export const usePinguStore = create<PinguState>((set, get) => ({
     }
   },
   
-  closeMenu: () => set({ isMenuOpen: false }),
+   closeMenu: () => {
+     set({ isMenuOpen: false, activePanel: null });
+   },
+   
+   // Panel management actions
+   openPanel: (panel) => {
+     set({ activePanel: panel, isMenuOpen: true });
+   },
+   
+   togglePanel: (panel) => {
+     const current = get().activePanel;
+     if (current === panel) {
+       set({ activePanel: null });
+     } else {
+       set({ activePanel: panel, isMenuOpen: true });
+     }
+   },
+   
+   closePanel: () => {
+     set({ activePanel: null });
+   },
   
   showPingu: () => set({ isVisible: true }),
   hidePingu: () => {
@@ -220,4 +252,11 @@ export function stopBlinkTimer(): void {
     clearTimeout(blinkInterval);
     blinkInterval = null;
   }
+}
+
+// ─── Convenience function for panel toggling from other components ──────────────
+
+/** Called when a Pingu menu item is clicked to toggle the appropriate overlay */
+export function togglePanel(panel: PinguPanelType): void {
+  usePinguStore.getState().togglePanel(panel);
 }

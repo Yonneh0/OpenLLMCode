@@ -1,4 +1,4 @@
-// CheckpointPanel — Cline-style checkpoint rollback panel (self-contained, no parent props needed)
+// CheckpointPanel — Cline-style checkpoint rollback panel (self-contained, no parent props needed) — VS Code Dark+ aesthetic
 import React from 'react';
 import { useTaskStore } from '../store/taskStore';
 
@@ -31,12 +31,12 @@ const CheckpointPanel: React.FC = () => {
 
   if (!currentTask || currentTask.checkpoints.length === 0) {
     return (
-      <div className="px-3 py-2 border-t border-[#45475a]">
+      <div className="px-3 py-2 border-t border-[#404040]">
         <div className="flex items-center justify-between mb-1.5">
-          <h3 className="text-xs font-semibold text-[#6c7086] uppercase tracking-wider">📍 Checkpoints</h3>
+          <h3 className="text-xs font-semibold text-[#858585] uppercase tracking-wider">📍 Checkpoints</h3>
           <button
             onClick={() => setShowCreateDialog(true)}
-            className="text-xs text-[#89b4fa] hover:text-[#b4d0fb] transition-colors"
+            className="text-xs text-[#4EC9B0] hover:text-[#89DCEB] transition-colors"
           >
             + Create
           </button>
@@ -47,13 +47,13 @@ const CheckpointPanel: React.FC = () => {
   }
 
   return (
-    <div className="px-3 py-2 border-t border-[#45475a] space-y-1.5">
+    <div className="px-3 py-2 border-t border-[#404040] space-y-1.5">
       {/* Header */}
       <div className="flex items-center justify-between mb-1">
-        <h3 className="text-xs font-semibold text-[#6c7086] uppercase tracking-wider">📍 Checkpoints</h3>
+        <h3 className="text-xs font-semibold text-[#858585] uppercase tracking-wider">📍 Checkpoints</h3>
         <button
           onClick={() => setShowCreateDialog(true)}
-          className="text-xs text-[#89b4fa] hover:text-[#b4d0fb] transition-colors"
+          className="text-xs text-[#4EC9B0] hover:text-[#89DCEB] transition-colors"
         >
           + Create
         </button>
@@ -80,26 +80,26 @@ const CheckpointPanel: React.FC = () => {
       {/* Create checkpoint dialog */}
       {showCreateDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCreateDialog(false)}>
-          <div className="bg-[#313244] rounded-xl shadow-2xl border border-[#45475a] max-w-sm w-full mx-4 p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-[#cdd6f4]">Create Checkpoint</h3>
+          <div className="bg-[#252526] rounded-xl shadow-2xl border border-[#404040] max-w-sm w-full mx-4 p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-[#D4D4D4]">Create Checkpoint</h3>
             <input
               type="text"
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
               placeholder="Checkpoint label..."
-              className="w-full bg-[#1e1e2e] border border-[#45475a] rounded-lg px-3 py-2 text-sm text-[#cdd6f4] placeholder:text-[#6c7086] focus:outline-none focus:border-[#cba6f7]"
+              className="w-full bg-[#1E1E1E] border border-[#404040] rounded-lg px-3 py-2 text-sm text-[#D4D4D4] placeholder:text-[#858585] focus:outline-none focus:border-[#007ACC]"
               autoFocus
             />
             <div className="flex gap-2">
               <button
                 onClick={handleCreateCheckpoint}
-                className="flex-1 px-4 py-2 bg-[#a6e3a1]/20 hover:bg-[#a6e3a1]/30 text-[#a6e3a1] rounded-lg font-medium text-sm transition-colors"
+                className="flex-1 px-4 py-2 bg-[#4EC9B0]/20 hover:bg-[#4EC9B0]/30 text-[#4EC9B0] rounded-lg font-medium text-sm transition-colors"
               >
                 Create
               </button>
               <button
                 onClick={() => { setShowCreateDialog(false); setNewLabel(''); }}
-                className="flex-1 px-4 py-2 bg-[#6c7086]/20 hover:bg-[#6c7086]/30 text-[#a6adc8] rounded-lg font-medium text-sm transition-colors"
+                className="flex-1 px-4 py-2 bg-[#585b70]/20 hover:bg-[#585b70]/30 text-[#858585] rounded-lg font-medium text-sm transition-colors"
               >
                 Cancel
               </button>
@@ -126,28 +126,28 @@ const CheckpointItem: React.FC<CheckpointItemProps> = ({ checkpoint, isCurrent, 
   const shortHash = checkpoint.gitCommitHash.slice(0, 8);
 
   return (
-    <div className="bg-[#1e1e2e] rounded-lg border border-[#45475a] overflow-hidden">
+    <div className="bg-[#1E1E1E] rounded-lg border border-[#404040] overflow-hidden">
       {/* Header row */}
       <button
         onClick={onToggleExpand}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-[#313244]/60 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-[#2A2D2E] transition-colors"
       >
         <span className={`text-xs ${expanded ? 'rotate-90' : ''} transition-transform`}>▶</span>
         <span className="flex-1">
-          <span className="text-sm text-[#cdd6f4]">{checkpoint.label}</span>
+          <span className="text-sm text-[#D4D4D4]">{checkpoint.label}</span>
           {isCurrent && (
-            <span className="ml-2 text-[10px] bg-[#a6e3a1]/20 text-[#a6e3a1] px-1.5 py-0.5 rounded">current</span>
+            <span className="ml-2 text-[10px] bg-[#4EC9B0]/20 text-[#4EC9B0] px-1.5 py-0.5 rounded">current</span>
           )}
         </span>
-        <span className="text-xs font-mono text-[#6c7086]">{shortHash}</span>
+        <span className="text-xs font-mono text-[#858585]">{shortHash}</span>
       </button>
 
       {/* Expanded details */}
       {expanded && (
-        <div className="px-3 py-2 border-t border-[#45475a] space-y-2">
+        <div className="px-3 py-2 border-t border-[#404040] space-y-2">
           {/* File changes count */}
           {checkpoint.fileChanges && checkpoint.fileChanges.length > 0 && (
-            <div className="text-xs text-[#a6adc8]">
+            <div className="text-xs text-[#858585]">
               ▸ {checkpoint.fileChanges.length} file{checkpoint.fileChanges.length !== 1 ? 's' : ''} changed
             </div>
           )}
@@ -161,13 +161,13 @@ const CheckpointItem: React.FC<CheckpointItemProps> = ({ checkpoint, isCurrent, 
           <div className="flex flex-col gap-1.5 pt-1">
             <button
               onClick={onRestore}
-              className="w-full px-3 py-1.5 bg-[#89b4fa]/10 hover:bg-[#89b4fa]/20 text-[#89b4fa] rounded-lg text-xs font-medium transition-colors"
+              className="w-full px-3 py-1.5 bg-[#007ACC]/20 hover:bg-[#007ACC]/30 text-[#007ACC] rounded-lg text-xs font-medium transition-colors"
             >
               🔽 Restore to This Point
             </button>
             <button
               onClick={onDeleteContextAfter}
-              className="w-full px-3 py-1.5 bg-[#f38ba8]/10 hover:bg-[#f38ba8]/20 text-[#f38ba8] rounded-lg text-xs font-medium transition-colors"
+              className="w-full px-3 py-1.5 bg-[#F44747]/20 hover:bg-[#F44747]/30 text-[#F44747] rounded-lg text-xs font-medium transition-colors"
             >
               🗑 Delete Context After This Point
             </button>

@@ -8,6 +8,58 @@ import { type Backend, type EngineConfig } from '../types';
 
 const GITHUB_RELEASES_URL = 'https://api.github.com/repos/ggerganov/llama.cpp/releases/latest';
 
+// App update check — checks for OpenLLMCode app updates (separate from engine binary updates)
+const APP_UPDATE_CHECK_INTERVAL_MS = 3600 * 1000; // Check every hour
+let lastAppUpdateCheck = 0;
+export let appVersion = '0.2.0'; // App version — increment when releasing new versions
+
+/** Check for app-level updates (separate from engine binary updates). 
+ *  Compares current version against the latest GitHub release tag of OpenLLMCode. */
+export async function checkForAppUpdates(): Promise<{ available: boolean; version: string; notes?: string } | null> {
+  // Only check if we haven't checked recently (avoid spamming API)
+  const now = Date.now();
+  if (now - lastAppUpdateCheck < APP_UPDATE_CHECK_INTERVAL_MS) return null;
+  
+  try {
+    const res = await axios.get('https://api.github.com/repos/Yonneh0/OpenLLMCode/releases/latest');
+    const latestVersion = res.data.tag_name.replace(/^v/, ''); // Strip 'v' prefix if present
+    
+    lastAppUpdateCheck = now;
+    
+    // Compare versions — simple semantic versioning comparison (only major.minor.patch)
+    const currentParts = appVersion.split('.').map(Number);
+    const latestParts = latestVersion.split('.').map(Number);
+    
+    for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
+      const curPart = currentParts[i] ?? 0;
+      const latPart = latestParts[i] ?? 0;
+      if (latPart > curPart) return { available: true, version: latestVersion, notes: res.data.body };
+      if (latPart < curPart) break; // Current is newer — don't warn about downgrades
+    }
+    
+    return null; // Same or older version
+  } catch {
+    lastAppUpdateCheck = now;
+    return null; // Failed to check — silently ignore
+  }
+}
+
+/** Download the latest app release asset for the current platform */
+export async function downloadAppRelease(assetUrl: string, destPath: string): Promise<void> {
+  const dir = pathModule.dirname(destPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  const response = await axios.get(assetUrl, {
+    responseType: 'arraybuffer',
+    onDownloadProgress(progress) {
+      const pct = Math.round((progress.loaded / (progress.total || progress.loaded)) * 100);
+      process.stdout.write(`Downloading app update: ${pct}%\r`);
+    },
+  });
+
+  fs.writeFileSync(destPath, Buffer.from(response.data));
+}
+
 // ─── Hardware detection ──────────────────────
 export async function detectHardware(): Promise<{
   platform: string;

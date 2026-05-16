@@ -394,6 +394,72 @@ export async function validateToken(token: string): Promise<{ valid: boolean; us
 }
 
 // ─── Exported for IPC ──────────────
+/** Get the GGUF quantization tag name for a given quantization format code */
+function getQuantTagFromFormat(formatCode: string): string | null {
+  const quantMap: Record<string, string> = {
+    'Q8_0': 'Q8_0',
+    'F16': 'F16',
+    'BF16': 'BF16',
+    'FP16': 'FP16',
+    'Q5_K_S': 'Q5_K_S',
+    'Q5_K_M': 'Q5_K_M',
+    'Q4_K_S': 'Q4_K_S',
+    'Q4_K_M': 'Q4_K_M',
+    'I8': 'I8',
+  };
+  return quantMap[formatCode] || null;
+}
+
+/** Fetch model file details (size, quantization) from HuggingFace API */
+export async function getModelFileDetails(modelId: string): Promise<Array<{ fileName: string; sizeBytes: number; format?: string }>> {
+  const session = await checkHFAuth();
+  const headers: Record<string, string> = {};
+  if (session?.token) headers['Authorization'] = `Bearer ${session.token}`;
+
+  try {
+    // Try common branch names since repos may use 'main', 'master', or other defaults
+    for (const branch of ['main', 'master']) {
+      try {
+        const res = await axios.get(`${HUGGINGFACE_API}/models/${modelId}/tree/${branch}`, { headers });
+        // Filter to GGUF files and extract size/format info from the filename
+        const ggufFiles = (res.data as any[]).filter((f: any) => f.path.endsWith('.gguf'));
+        
+        return ggufFiles.map((f: any) => {
+          const quant = extractQuantizationFormat(f.path);
+          // Convert null to undefined for type compatibility with the return type
+          return {
+            fileName: f.path,
+            sizeBytes: f.size || 0,
+            format: quant !== null ? quant : undefined,
+          };
+        });
+      } catch {
+        // Try next branch
+      }
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/** Extract quantization format from GGUF filename (e.g., 'model-Q8_0.gguf' -> 'Q8_0'). Returns undefined if no match found. */
+function extractQuantizationFormat(fileName: string): string | undefined {
+  const match = fileName.match(/-([A-Z]([KQ])?\d+[._]?[KM])\.gguf$/);
+  if (match) return match[1];
+  
+  // Try other common patterns
+  const formats = ['Q8_0', 'F16', 'BF16', 'FP16', 'Q5_K_S', 'Q5_K_M', 'Q4_K_S', 'Q4_K_M', 'I8'];
+  for (const fmt of formats) {
+    if (fileName.includes(fmt)) return fmt;
+  }
+  
+  // Fallback: look for any uppercase letter followed by digits and optional suffix
+  const fallback = fileName.match(/[A-Z][KQ]?\d+[._]?[KM]/);
+  return fallback?.[0];
+}
+
+// ─── Exported for IPC ──────────────
 export async function hfInit() {
   await checkHFAuth();
   const models = await listLocalModels();
