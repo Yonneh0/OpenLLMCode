@@ -5,6 +5,7 @@ import ApprovalGate from './components/ApprovalGate';
 import CheckpointPanel from './components/CheckpointPanel';
 import TaskPanel from './components/TaskPanel';
 import { McpPanel } from './components/McpPanel';
+import VMPanel from './components/VMPanel';
 import { PinguAvatar } from './components/PinguAvatar';
 import { MonacoEditor } from './components/MonacoEditor';
 import { XTermTerminal } from './components/XTermTerminal';
@@ -89,7 +90,7 @@ export function App() {
 
   // Activity bar active tab state
   const [activeActivityId, setActiveActivityId] = useState('explorer');
-  const [sidebarActiveTab, setSidebarActiveTab] = useState<'project' | 'tasks' | 'mcp'>('project');
+  const [sidebarActiveTab, setSidebarActiveTab] = useState<'project' | 'tasks' | 'mcp' | 'vm'>('project');
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#1E1E1E] text-white font-sans">
@@ -131,6 +132,14 @@ export function App() {
               >
                 MCP
               </button>
+              <button
+                onClick={() => setSidebarActiveTab('vm')}
+                className={`px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+                  sidebarActiveTab === 'vm' ? 'text-white border-b border-[#007ACC]' : 'text-[#858585] hover:text-[#CCCCCC]'
+                }`}
+              >
+                VMs
+              </button>
             </div>
 
             {/* Section header — Project section */}
@@ -164,10 +173,17 @@ export function App() {
               </div>
             )}
 
-            {/* Skills panel toggle button (P2-C) */}
-            {sidebarActiveTab === 'project' && (
+            {/* QEMU VMs — live from store state */}
+            {sidebarActiveTab === 'vm' && (
+              <div className="flex-1 overflow-y-auto border-t border-[#404040]">
+                <VMPanel />
+              </div>
+            )}
+
+            {/* Skills panel toggle button (P2-C) — only show when Project tab is active */}
+            {sidebarActiveTab === 'project' && !showSkillsPanel && (
               <button 
-                onClick={() => setShowSkillsPanel(!showSkillsPanel)}
+                onClick={() => setShowSkillsPanel(true)}
                 className="px-3 py-1.5 border-t border-[#404040] text-[11px] hover:bg-[#2A2D2E] transition flex items-center gap-1.5 text-[#858585]"
                 title="Agent Skills"
               >
@@ -175,11 +191,10 @@ export function App() {
               </button>
             )}
 
-            {/* Project action buttons */}
+            {/* Project action buttons — only show when Project tab is active */}
             {sidebarActiveTab === 'project' && (
               <div className="px-3 py-2 border-t border-[#404040] flex gap-1.5">
-                <button className="flex-1 px-1.5 py-1 rounded bg-[#3C3C3C] hover:bg-[#404040] text-[11px] transition cursor-pointer" title="Change Root">📂</button>
-                <button onClick={() => setShowWizard(true)} className="px-1.5 py-1 rounded bg-[#3C3C3C] hover:bg-[#404040] text-[11px] transition cursor-pointer" title="New Project">+</button>
+                <button onClick={() => setShowWizard(true)} className="flex-1 px-1.5 py-1 rounded bg-[#3C3C3C] hover:bg-[#404040] text-[11px] transition cursor-pointer" title="New Project">+</button>
               </div>
             )}
 

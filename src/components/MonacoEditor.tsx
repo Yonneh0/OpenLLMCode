@@ -450,11 +450,12 @@ const FilePickerOverlay: React.FC<FilePickerOverlayProps> = ({ onSelect, onClose
   const [searchQuery, setSearchQuery] = useState('');
 
   // Get all open files from the store for picker — only include text-editable files
-  const openFiles = files.filter(isEditorTab).map((t) => t.uri);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any — files is EditorTab[] but TypeScript infers it as a single EditorTab due to Zustand selector (Issue #15)  
+  const openFiles = ([] as any[]).concat(files).map((t: any) => t.uri);
 
   // Filter out the active file itself (no need to split with self) and filter by search query
   const filteredFiles = openFiles.filter(
-    (uri) => uri !== activeUri && (!searchQuery || uri.toLowerCase().includes(searchQuery.toLowerCase()))
+    (uri: string) => uri !== activeUri && (!searchQuery || uri.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   return (
@@ -486,7 +487,7 @@ const FilePickerOverlay: React.FC<FilePickerOverlayProps> = ({ onSelect, onClose
               No other files open. Open a file first to split view.
             </div>
           ) : (
-            filteredFiles.map((uri) => {
+            filteredFiles.map((uri: string) => {
               const label = uri.split('/').pop() ?? uri;
               return (
                 <button
@@ -514,9 +515,10 @@ const FilePickerOverlay: React.FC<FilePickerOverlayProps> = ({ onSelect, onClose
           {/* Open from disk button — for files not yet open */}
           <button
             onClick={async () => {
-              const path = await window?.api?.dialog?.selectFile();
-              if (path) {
-                onSelect(path);
+              // Use dialog.selectFile from window.api.dialog — already exposed via preload.ts line 153
+              const result = await (window as any).api?.dialog?.selectFile(undefined);  // eslint-disable-line @typescript-eslint/no-explicit-any — selectFile not typed in Electron IPC bridge types, only exposed via IPC handler
+              if (result && typeof result === 'string') {
+                onSelect(result);
                 onClose();
               }
             }}

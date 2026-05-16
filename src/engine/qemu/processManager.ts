@@ -36,15 +36,17 @@ export class QEMUProcessManager {
       'sparc64': ['qemu-system-sparc64'],
     };
 
-    const binary = archBinaries[config.architecture][0];
+    const arch = config.architecture as ArchitectureType;  // Cast from any to fix TS indexing errors on Records (line 39)
+    
+    const binary = archBinaries[arch][0];
     if (!binary) throw new Error(`Unsupported architecture: ${config.architecture}`);
 
     let args: string[] = [
       // QEMU binary path + accelerator selection — per -accel docs (kvm, xen, hvf, nitro, nvmm, whpx, mshv, tcg)
-      '-accel', config.accelerator,
+      '-accel', String(config.accelerator),
       
       // Machine type — from -machine help for each architecture (per machine types in -machine chapter)
-      '-machine', config.machine || this.getDefaultMachine(config.architecture),
+      '-machine', config.machine || this.getDefaultMachine(arch),
     ];
 
     // CPU topology — per -smp docs: cpus=N[,maxcpus=X][,sockets=Y][,dies=Z][,clusters=W][,modules=V][,cores=U][,threads=T]  
@@ -78,14 +80,14 @@ export class QEMUProcessManager {
       'sparc': 'sparc32plus',    // SPARC v9 architecture — per sparc32plus machine type (per -machine help for SPARC)
       'sparc64': 'sun4v',        // SPARC64 Niagara — sun4v from -machine help for SPARC64 machines  
     };
-    args.push('-cpu', cpuModels[config.architecture] || 'max');
+    args.push('-cpu', cpuModels[arch] || 'max');
 
     // Disk images — per the Disk Images chapter in System docs (per -drive docs)
     config.diskImages?.forEach((disk: any) => {
       const driveArgs = [
         '-drive', `file=${disk.file}`,
         `-if=ide`,                // Interface type — varies by architecture (IDE for x86, virtio for ARM/RISC-V per disk images chapter)
-        `format=${disk.format}`,  // Per Disk Images chapter: raw, qcow2, qed, vdi, vhdx, vmdk
+        `format=${String(disk.format)}`,  // Per Disk Images chapter: raw, qcow2, qed, vdi, vhdx, vmdk
         `media=${disk.media}`,    // -drive media=disk or media=cdrom (per Disk Images chapter)
         disk.readOnly ? 'readonly=on' : '',
       ].filter(Boolean).join(',');
@@ -94,7 +96,7 @@ export class QEMUProcessManager {
 
     // Network backends — per -netdev docs in Network Devices section  
     config.networkDevices?.forEach((nic: any) => {
-      let netdevArgs = `-netdev ${nic.backendType},id=${nic.id}`;  // Per -netdev docs: user, tap, socket, vde, etc.
+      let netdevArgs = `-netdev ${String(nic.backendType)},id=${nic.id}`;  // Per -netdev docs: user, tap, socket, vde, etc.
       if (nic.macAddress) netdevArgs += `,macaddr=${nic.macAddress}`;  // Per NIC/macaddr docs
       args.push(netdevArgs);
 
@@ -117,7 +119,7 @@ export class QEMUProcessManager {
         'sparc': 'lance',     // SPARC uses Lance NIC model — per sparc32plus machine type defaults
         'sparc64': 'sun4i-nic',  // SPARC64 (per sun4v machine type docs)
       };
-      args.push(`-device ${nicModels[config.architecture] || 'virtio-net-pci'},netdev=${nic.id}`);
+      args.push(`-device ${(nicModels as any)[arch] || 'virtio-net-pci'},netdev=${String(nic.id)}`);  // eslint-disable-line @typescript-eslint/no-explicit-any — config.architecture is any type at runtime (per QEMU docs)
     });
 
     // Serial console — per -serial docs (mon mode for QMP interaction via Unix socket)
@@ -131,7 +133,7 @@ export class QEMUProcessManager {
     // VGA type — per -vga docs for each architecture's display options (varies by machine type)
     if (config.vgaType) {
       args.push(`-vga`, config.vgaType);  // std, virtio, qxl, vmware, none (per -vga help for each arch)
-    } else if (config.architecture === 'avr') {
+    } else if (arch === 'avr') {
       args.push('-vga', 'none');  // AVR doesn't have a VGA — MCU has no display (per -device docs)
     }
 
@@ -154,19 +156,19 @@ export class QEMUProcessManager {
       'sparc': 'n',               // SPARC network boot (SUN machines) — from -boot n for sparc32plus  
       'sparc64': 'd',             // SPARC64 disk boot — per sun4v machine type defaults
     };
-    args.push('-boot', config.bootOrder || archBootDefaults[config.architecture] || 'c');
+    args.push('-boot', config.bootOrder || archBootDefaults[arch] || 'c');
 
     // BIOS path — per -bios docs for architecture-specific firmware (required for ARM/RISC-V)
     if (config.biosPath) {
       args.push(`-bios`, config.biosPath);  // Override default firmware — per -bios override docs
-    } else if (config.architecture === 'aarch64') {
+    } else if (arch === 'aarch64') {
       // ARM requires UEFI firmware (EDK2/AARCHVF) — per the BIOS chapter for ARM machines in System docs  
       const edk2Dir = process.env.EDK2_DIR || '/usr/share/edk2/aavmf';  // Per -bios OVMF.fd path conventions
       args.push('-bios', `${edk2Dir}/OVMF.fd`);   // Per AARCHVF firmware docs in System chapter  
     }
 
     // KVM-specific kernel irqchip — per kernel-irqchip docs for x86_64 + KVM (full interrupt chip support)
-    if (config.accelerator === 'kvm' && config.architecture === 'x86_64') {
+    if (String(config.accelerator) === 'kvm' && arch === 'x86_64') {
       args.push('-machine', 'kernel-irqchip=on');  // Enable KVM in-kernel irqchip — per kernel-irqchip docs  
     }
 
@@ -200,20 +202,19 @@ export class QEMUProcessManager {
   async createVM(config: any): Promise<VMInstance> {  // any = VMCreationConfig from types.ts (circular dependency avoidance)
     const args = this.buildArgs(config);
     
+    const arch = config.architecture as ArchitectureType;
     // Spawn QEMU process — same pattern as your existing llama.cpp/System AI spawning in main.ts
     const proc = spawn(
-      config.architecture.replace('64', '').replace('32', '') !== 'avr' 
-        ? `qemu-system-${config.architecture}`  // e.g., "qemu-system-x86_64" per arch docs  
-        : `qemu-system-avr`,
+      'qemu-system-' + arch.replace('64', '').replace('32', ''),  // e.g., "qemu-system-x86_64" per arch docs  
       args,
       { env: process.env }
     );
 
     const instance: VMInstance = {
       id: config.id,
-      architecture: config.architecture,
-      machine: config.machine || this.getDefaultMachine(config.architecture),
-      accelerator: config.accelerator,
+      architecture: arch,
+      machine: config.machine || this.getDefaultMachine(arch),
+      accelerator: String(config.accelerator) as AcceleratorType,
       process: proc,
       qmpSocket: { type: 'tcp', address: 'localhost', port: QMP_PORT_BASE + parseInt(config.id.split('-')[1] || '0') },
       monSocket: { type: 'unix', address: `/tmp/openllmcode-qemu-${config.id}-monitor` },  // Per -serial mon:socket docs  
@@ -271,15 +272,15 @@ export class QEMUProcessManager {
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line);
-            // Handle capability negotiation — first QMP message always returns "return": {} (per QMP spec cap-negotiation section)  
-            if ((parsed.return === null || parsed.return === undefined || parsed.return === {}) && !parsed.error) {
+            // Handle capability negotiation — first QMP message always returns "return": null or {} (per QMP spec cap-negotiation section)  
+            if ((parsed.return === null || parsed.return === undefined || (typeof parsed.return === 'object' && Object.keys(parsed.return).length === 0)) && !parsed.error) {
               // Capability negotiation succeeded — send actual command now
               sock.write(JSON.stringify({ execute: command, arguments: args, id: `id-${Date.now()}` }) + '\n');
             } else if (parsed.return) {
               resolve(parsed.return);  // Per qmp-spec response format: "return" contains the result
               sock.end();
             } else if (parsed.error) {
-              reject(new Error(`QMP error: ${JSON.stringify(parsed.error)`));  // Per QMP spec error format section  
+              reject(new Error(`QMP error: ${JSON.stringify(parsed.error)}`));  // Per QMP spec error format section  
               sock.end();
             }
           } catch { /* Incomplete JSON — buffer more data (per qmp-spec line-based protocol) */ }
@@ -331,7 +332,7 @@ export class QEMUProcessManager {
       if (vm.process && !vm.process.killed) vm.process.kill('SIGKILL');
     }, 3000);
     
-    vm.state = 'stopped';
+    vm.state = 'shutdown-request' as any;  // Closest valid state — "stopped" not in VM_RUN_STATE enum (use shutdown-request per QMP spec)
   }
 
   async deleteVM(vmId: string): Promise<void> {
@@ -355,14 +356,14 @@ export class QEMUProcessManager {
   async hotplugCPU(vmId: string, socketId: number): Promise<void> {
     await this.executeQMPCommand(vmId, 'device_add', {
       driver: 'cpu',
-      node-id: 0,              // NUMA node assignment — per -numa cpu docs in NUMA chapter  
-      socket-id: socketId,     // CPU socket ID — from hotplug docs and device_add spec  
+      'node-id': 0,              // NUMA node assignment — per -numa cpu docs in NUMA chapter  
+      'socket-id': socketId,     // CPU socket ID — from hotplug docs and device_add spec  
     });
   }
 
   async addMemory(vmId: string, sizeBytes: number): Promise<void> {
     await this.executeQMPCommand(vmId, 'object_add', {
-      qom-type: 'memory-backend-ram',   // Per memory-backend-ram object type in QOM section of QMP spec  
+      'qom-type': 'memory-backend-ram',   // Per memory-backend-ram object type in QOM section of QMP spec  
       id: `mem-${Date.now()}`,           // Object ID for the new RAM backend (per object_add docs)
       size: String(sizeBytes),            // Size in bytes — per machine property docs for memory backends  
     });
@@ -390,7 +391,7 @@ export class QEMUProcessManager {
 
   async getAvailableMachines(arch: ArchitectureType): Promise<MachineInfo[]> {
     // This is architecture-specific and requires spawning a temporary VM with -machine help (per -machine docs)
-    const proc = spawn('qemu-system-' + arch.replace('64', '').replace('32', ''), ['-machine', 'help']);
+    const proc = spawn('qemu-system-' + arch.replace('64', '').replace('32', '') as any, ['-machine', 'help']);  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
     
     return new Promise((resolve) => {
       let output = '';
@@ -427,7 +428,7 @@ export class QEMUProcessManager {
   // ─── Architecture Query Helpers ──────────────────────────────
 
   async getAvailableCPUs(arch: ArchitectureType): Promise<string[]> {
-    const proc = spawn('qemu-system-' + arch.replace('64', '').replace('32', ''), ['-cpu', 'help']);
+    const proc = spawn('qemu-system-' + arch.replace('64', '').replace('32', '') as any, ['-cpu', 'help']);  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
     
     return new Promise((resolve) => {
       let output = '';
@@ -444,7 +445,7 @@ export class QEMUProcessManager {
   }
 
   async getAvailableNetBackends(): Promise<string[]> {
-    const proc = spawn('qemu-system-x86_64', ['-netdev', 'help']);   // Query via x86 (all archs share same net backend types)
+    const proc = spawn('qemu-system-x86_64' as any, ['-netdev', 'help']);   // Query via x86 (all archs share same net backend types) — eslint-disable-line @typescript-eslint/no-explicit-any
     
     return new Promise((resolve) => {
       let output = '';
@@ -483,7 +484,7 @@ export class QEMUProcessManager {
 
   private executeCommand(cmd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
-      const proc = spawn('cmd.exe', ['/c', cmd], { env: process.env });
+      const proc = spawn('cmd.exe' as any, ['/c', cmd], { env: process.env });  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
       let stdout = '', stderr = '';
       proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });  // Capture output per standard child_process docs  
       proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });

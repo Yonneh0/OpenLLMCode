@@ -84,10 +84,9 @@ class ToolchainRegistry {
     if (fs.existsSync(targetDir)) return Promise.resolve();  // Already downloaded — per QEMU tools docs recommendation
     
     // Download each compiler binary — verify checksum per QEMU tools docs chapter on disk image security
-    const downloads = family.compilers.map(comp => this.downloadBinary(
+    const downloads = family.compilers.map((comp) => this.downloadBinary(
       comp.downloadUrl, 
       pathModule.join(targetDir, 'bin', comp.name),
-      comp.version
     ));
 
     return Promise.all(downloads).then(() => {

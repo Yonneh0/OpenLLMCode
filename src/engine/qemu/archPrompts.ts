@@ -34,6 +34,23 @@ export interface ArchPromptTemplate {
 }
 
 const ARCH_PROMPTS: Record<ArchitectureType, ArchPromptTemplate> = {
+  // ─── i386 — legacy x86 (32-bit) architecture with QEMU machine type support ──────────────────────────────
+  'i386': {
+    architecture: 'i386 (x86)',
+    systemPromptPrefix: `You are running code in a 32-bit i386 QEMU virtual machine. The VM uses the pc-i440fx machine type (legacy Intel chipset) with e1000 network adapter and boots from disk (hard drive).`,
+    buildCommands: { 'Make': 'make -j$(nproc)', 'CMake': 'cmake --build . --parallel $(nproc)' },
+    testCommands: { 'Make': 'make check', 'CMake': 'ctest --parallel $(nproc) --output-on-failure' },
+    crossCompileEnv: {},  // Native — no cross-compilation needed for i386 (per -cpu core2duo docs)
+    knownIssues: [
+      '32-bit architecture limits RAM to ~4GB per process',
+      'pc-i440fx machine type is legacy — prefer q35 for new projects if possible',
+      'e1000 NIC uses user-mode networking — guest can reach host at 192.168.x.1, not outbound internet by default',
+    ],
+    recommendedDiskFormat: 'qcow2',   // qcow2 supports snapshots (useful for VM restore)
+    defaultVgaType: 'std',             // Standard VGA — works with all Windows/Linux guests  
+    bootOrderDefault: 'dc',            // CD then HD for legacy x86 — per -boot docs for i386 pc-i440fx machine type
+  },
+
   // ─── x86_64 — standard PC architecture with KVM acceleration support ──────────────────────────────
   'x86_64': {
     architecture: 'x86_64',
@@ -118,8 +135,8 @@ const ARCH_PROMPTS: Record<ArchitectureType, ArchPromptTemplate> = {
   'avr': {
     architecture: 'AVR/8-bit (Microcontroller)',
     systemPromptPrefix: `You are running code in an AVR QEMU virtual machine simulating the ATmega328p microcontroller — identical to Arduino Uno. This is NOT a general-purpose computer; it has no operating system, no disk image, and runs directly from flash memory. Use avr-gcc for compilation (not standard make/cmake).`,
-    buildCommands: { 'Build': `avr-gcc -mmcu=atmega328p -O2 -o "${PROJECT_DIR}/firmware.hex" ${SRC_FILES} && avr-objcopy -O ihex "${PROJECT_DIR}/firmware.hex"` },
-    testCommands: { 'Simulate': `qemu-system-avr -M attiny2313 -nographic -serial mon:stdio -L . -bios firmware.hex` },
+    buildCommands: { 'Build': 'avr-gcc -mmcu=atmega328p -O2 -o firmware.hex <source_files> && avr-objcopy -O ihex firmware.hex' },
+    testCommands: { 'Simulate': 'qemu-system-avr -M attiny2313 -nographic -serial mon:stdio -L . -bios firmware.hex' },
     crossCompileEnv: { MCU: 'atmega328p', F_CPU: '16000000' },  // Arduino Uno: 16MHz clock, ATmega328p MCU — per avr docs  
     knownIssues: [
       'AVR has no OS — this is bare-metal embedded development for microcontrollers (Arduino)',
@@ -266,4 +283,36 @@ export function getArchPrompt(arch: ArchitectureType): ArchPromptTemplate {
 // ─── Get all available architectures with their prompts ──────────────────────────────
 export function getAllArchPrompts(): ArchPromptTemplate[] {
   return Object.values(ARCH_PROMPTS);
+}
+
+// ─── Resolve template variables in build/test commands at runtime ──────────────────────────────
+interface TemplateVars {
+  PROJECT_DIR?: string;
+  SRC_FILES?: string;
+  [key: string]: string | undefined;
+}
+
+export function resolveCommandTemplate(template: string, vars: TemplateVars): string {
+  let result = template;
+  for (const [key, value] of Object.entries(vars)) {
+    if (value !== undefined) {
+      const regex = new RegExp(`\\$\\{${key}\\}`, 'g');
+      result = result.replace(regex, value);
+    }
+  }
+  return result;
+}
+
+export function resolveBuildCommand(arch: ArchitectureType, buildToolName: string, vars?: TemplateVars): string {
+  const prompt = getArchPrompt(arch);
+  const template = prompt.buildCommands[buildToolName] || '';
+  if (vars) return resolveCommandTemplate(template, vars);
+  return template;
+}
+
+export function resolveTestCommand(arch: ArchitectureType, testToolName: string, vars?: TemplateVars): string {
+  const prompt = getArchPrompt(arch);
+  const template = prompt.testCommands[testToolName] || '';
+  if (vars) return resolveCommandTemplate(template, vars);
+  return template;
 }

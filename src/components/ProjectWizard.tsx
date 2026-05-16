@@ -152,6 +152,13 @@ export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose })
   const [progress, setProgress] = useState(0);
   const [statusMsg, setStatusMsg] = useState('');
 
+  // Lift authConfig up so cloneRepository callback can access it (Fix for TS2304: Cannot find name 'authConfig')
+  const [cloneAuthConfig, setCloneAuthConfig] = useState<CloneAuthConfig>({ authType: 'none' });
+
+  // Use ref to ensure cloneRepository reads the latest state at call time, not stale closure
+  const cloneAuthRef = React.useRef(cloneAuthConfig);
+  cloneAuthRef.current = cloneAuthConfig;
+
   // Create an empty project
   const createEmptyProject = useCallback(async () => {
     setStep('progress');
@@ -218,7 +225,7 @@ export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose })
     }
   }, [selectedTemplate, onClose]);
 
-  // Clone a repository — with optional auth support for private repos
+  // Clone a repository — with optional auth support for private repos  
   const cloneRepository = useCallback(async () => {
     if (!cloneUrl.trim()) return;
 
@@ -234,20 +241,20 @@ export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose })
       setStatusMsg(`Cloning ${cloneUrl}...`);
       setProgress(30);
 
+      // Read from ref — ensures latest state at call time, not stale closure
+      const currentAuth = cloneAuthRef.current;
+      
       let fullCmd: string;
       
-      if (authConfig.authType === 'token' && authConfig.token) {
-        // Use PAT — embed token in HTTPS URL for authentication
-        const authenticatedUrl = buildAuthenticatedUrl(cloneUrl, authConfig.token);
+      if (currentAuth.authType === 'token' && currentAuth.token) {
+        const authenticatedUrl = buildAuthenticatedUrl(cloneUrl, currentAuth.token);
         fullCmd = `git clone "${authenticatedUrl}" "${newRoot}"`;
         setStatusMsg(`Cloning (using token)...`);
-      } else if (authConfig.authType === 'ssh_key' && authConfig.sshKeyPath) {
-        // Use custom SSH key — set GIT_SSH_COMMAND with the private key path
-        const sshCmd = buildSshCloneCommand(authConfig.sshKeyPath);
+      } else if (currentAuth.authType === 'ssh_key' && currentAuth.sshKeyPath) {
+        const sshCmd = buildSshCloneCommand(currentAuth.sshKeyPath);
         fullCmd = `${sshCmd}git clone "${cloneUrl}" "${newRoot}"`;
         setStatusMsg(`Cloning (using SSH key)...`);
-      } else if (authConfig.authType === 'credential_helper') {
-        // Use Git credential helper — let system handle auth via Windows Credential Manager / macOS Keychain
+      } else if (currentAuth.authType === 'credential_helper') {
         fullCmd = `git clone --config core.autocrlf=false "${cloneUrl}" "${newRoot}"`;
         setStatusMsg(`Cloning (using credentials manager)...`);
       } else {
@@ -268,7 +275,7 @@ export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose })
     } catch (err) {
       setStatusMsg(`Error: ${err}`);
     }
-  }, [cloneUrl, projectName, onClose, authConfig]);
+  }, [cloneUrl, projectName, onClose]);
 
   // Open an existing folder
   const openExistingFolder = useCallback(async () => {
@@ -363,6 +370,8 @@ export const ProjectWizard: React.FC<ProjectWizardProps> = ({ isOpen, onClose })
         onClone={cloneRepository}
         onBack={() => setStep('welcome')}
         onClose={onClose}
+        authConfig={cloneAuthConfig}
+        setAuthConfig={setCloneAuthConfig}
       />
     );
   }
@@ -638,9 +647,9 @@ const CloneStep: React.FC<{
   onClone: () => void;
   onBack: () => void;
   onClose: () => void;
-}> = ({ cloneUrl, setCloneUrl, projectName, setProjectName, onClone, onBack }) => {
-  const [authConfig, setAuthConfig] = useState<CloneAuthConfig>({ authType: 'none' });
-
+  authConfig: CloneAuthConfig;
+  setAuthConfig: React.Dispatch<React.SetStateAction<CloneAuthConfig>>;
+}> = ({ cloneUrl, setCloneUrl, projectName, setProjectName, onClone, onBack, onClose, authConfig, setAuthConfig }) => {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onBack}>
       <div className="bg-[#1e1e2e] rounded-xl p-8 w-full max-w-md border border-[#313244]" onClick={(e) => e.stopPropagation()}>
@@ -690,7 +699,7 @@ const OpenFolderStep: React.FC<{
   onOpen: () => void;
   onBack: () => void;
   onClose: () => void;
-}> = ({ onOpen, onBack }) => (
+}> = ({ onOpen, onBack, onClose }) => (
   <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onBack}>
     <div className="bg-[#1e1e2e] rounded-xl p-8 w-full max-w-md border border-[#313244]" onClick={(e) => e.stopPropagation()}>
       <h2 className="text-lg font-semibold text-[#cdd6f4] mb-4">📂 Open Existing Folder</h2>
