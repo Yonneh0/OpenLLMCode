@@ -40,8 +40,24 @@ const DATA_DIR = path.join(
   'OpenLLMCode',
 );
 
+/** Keytar key for storing the HF token in OS keychain */
+const HF_KEYTAR_SERVICE = 'OpenLLMCode';
+const HF_KEYTAR_USERNAME = 'huggingface-token';
+
 // ─── Authentication ──────────────────────
 export async function checkHFAuth(): Promise<HFSession | null> {
+  // Try OS keychain first (Phase F-2) — if available, use it instead of local JSON file
+  try {
+    const keytar = await import('keytar');
+    const token = await keytar.getPassword(HF_KEYTAR_SERVICE, HF_KEYTAR_USERNAME);
+    if (token) {
+      return { token, method: 'browser', expiresAt: Date.now() + 365 * 24 * 3600 * 1000 };
+    }
+  } catch {
+    // keytar not available — fall back to local config file
+  }
+  
+  // Fallback: read from local JSON file (Phase B)
   try {
     const configPath = path.join(DATA_DIR, 'hf_config.json');
     if (fs.existsSync(configPath)) {
@@ -51,13 +67,37 @@ export async function checkHFAuth(): Promise<HFSession | null> {
   return null;
 }
 
+/** Login with a token — stores it in OS keychain first, then also saves to local config as backup */
 export async function loginBrowser(token: string): Promise<HFSession> {
+  // Store in OS keychain if available (Phase F-2)
+  try {
+    const keytar = await import('keytar');
+    await keytar.setPassword(HF_KEYTAR_SERVICE, HF_KEYTAR_USERNAME, token);
+  } catch {
+    // keytar not available — continue with local config only
+  }
+  
+  // Also save to local config file for backward compatibility and offline access
   const session: HFSession = { token, method: 'browser', expiresAt: Date.now() + 365 * 24 * 3600 * 1000 };
   fs.writeFileSync(path.join(DATA_DIR, 'hf_config.json'), JSON.stringify(session));
   return session;
 }
 
+/** CLI-based login — runs huggingface-cli and stores the resulting token in keychain */
 export async function loginCLI(modelPath?: string): Promise<{ success: boolean; username?: string }> {
+  // First try to get token from keytar if available (user may have already authenticated via browser)
+  try {
+    const keytar = await import('keytar');
+    const existingToken = await keytar.getPassword(HF_KEYTAR_SERVICE, HF_KEYTAR_USERNAME);
+    if (existingToken) {
+      const validation = await validateToken(existingToken);
+      if (validation.valid) {
+        return { success: true, username: validation.username };
+      }
+    }
+  } catch {}
+  
+  // Run huggingface-cli login in embedded terminal (Phase D terminal integration)
   // Runs `huggingface-cli login` in embedded terminal (Phase D terminal integration)
   const modelDir = modelPath || path.join(DATA_DIR, 'models');
   fs.mkdirSync(modelDir, { recursive: true });
@@ -77,7 +117,15 @@ export async function loginCLI(modelPath?: string): Promise<{ success: boolean; 
   });
 }
 
+/** Logout — removes the token from keychain AND local config file */
 export async function logout(): Promise<void> {
+  // Remove from OS keychain if available (Phase F-2)
+  try {
+    const keytar = await import('keytar');
+    await keytar.deletePassword(HF_KEYTAR_SERVICE, HF_KEYTAR_USERNAME);
+  } catch {}
+  
+  // Also remove from local config file for consistency
   const configPath = path.join(DATA_DIR, 'hf_config.json');
   if (fs.existsSync(configPath)) fs.unlinkSync(configPath);
 }
@@ -238,8 +286,15 @@ export function getDownloadQueue(): QueuedDownload[] {
   return [...downloadQueue];
 }
 
+/** Interface for local GGUF/BIN models found in the models directory */
+export interface LocalModelInfo {
+  name: string;
+  path: string;
+  sizeMB: number;
+}
+
 // ─── Local model file discovery ──────────────
-export async function listLocalModels(modelDir?: string): Promise<Array<{ name: string; path: string; sizeMB: number }>> {
+export async function listLocalModels(modelDir?: string): Promise<LocalModelInfo[]> {
   const dir = modelDir || path.join(DATA_DIR, 'models');
   fs.mkdirSync(dir, { recursive: true });
 
@@ -317,7 +372,19 @@ export async function hfCliListModels(): Promise<string[]> {
 }
 
 // ─── Token refresh & validation ──────────────
+/** Validate an existing token — checks if still valid and returns the associated username */
 export async function validateToken(token: string): Promise<{ valid: boolean; username?: string }> {
+  // First check keytar for a potentially better (refreshed) token
+  try {
+    const keytar = await import('keytar');
+    const keytarToken = await keytar.getPassword(HF_KEYTAR_SERVICE, HF_KEYTAR_USERNAME);
+    if (keytarToken && keytarToken !== token) {
+      // Keytar has a different token — validate that one instead
+      return validateToken(keytarToken);
+    }
+  } catch {}
+  
+  // Validate the provided token against HuggingFace API
   try {
     const res = await axios.get(`${HUGGINGFACE_API}/whoami`, { headers: { Authorization: `Bearer ${token}` } });
     return { valid: true, username: (res.data as any)?.username };

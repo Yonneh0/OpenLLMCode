@@ -1,0 +1,223 @@
+// Pingu Store — Zustand store for System AI avatar state and animations (Phase G-2)
+import { create } from 'zustand';
+
+export type PinguMood = 'idle' | 'thinking' | 'speaking' | 'happy' | 'error' | 'working';
+
+interface PinguState {
+  // Current mood — drives all visual behavior
+  mood: PinguMood;
+  
+  // Whether the avatar is visible and clickable (always on, but can be hidden in compact mode)
+  isVisible: boolean;
+  
+  // Whether the menu panel is open when clicking Pingu
+  isMenuOpen: boolean;
+  
+  // Cursor position for eye-following animation (in component-relative coordinates, -1 to 1)
+  mouseX: number;
+  mouseY: number;
+  
+  // Current animation frame index (for mouth movement during speaking)
+  mouthFrame: number;
+  
+  // Blink state — whether currently blinking
+  isBlinking: boolean;
+  
+  // Animation speed multiplier for body bob
+  bobSpeed: number;
+  
+  // Actions — mood transitions
+  setMood: (mood: PinguMood) => void;
+  resetMood: () => void;
+  
+  // Actions — menu toggle
+  toggleMenu: () => void;
+  closeMenu: () => void;
+  
+  // Actions — visibility control
+  showPingu: () => void;
+  hidePingu: () => void;
+  
+  // Actions — cursor tracking (used by PinguAvatar component)
+  setCursorPos: (x: number, y: number) => void;
+  
+  // Actions — animation frame updates (used by requestAnimationFrame loop in PinguAvatar)
+  advanceMouthFrame: () => void;
+  triggerBlink: () => void;
+  updateBobSpeed: (speedMultiplier: number) => void;
+}
+
+export const usePinguStore = create<PinguState>((set, get) => ({
+  mood: 'idle',
+  isVisible: true,
+  isMenuOpen: false,
+  mouseX: 0,
+  mouseY: 0,
+  mouthFrame: 0,
+  isBlinking: false,
+  bobSpeed: 1,
+  
+  setMood: (mood) => {
+    // When transitioning to 'speaking', reset mouth frame so animation starts fresh
+    if (mood === 'speaking') {
+      set({ mood, mouthFrame: 0 });
+    } else {
+      set({ mood });
+    }
+  },
+  
+  resetMood: () => {
+    // When a task completes — transition to happy briefly then back to idle
+    const currentMood = get().mood;
+    if (currentMood !== 'happy') {
+      set({ mood: 'happy' });
+      setTimeout(() => set({ mood: 'idle' }), 2000); // Happy for 2 seconds, then back to idle
+    } else {
+      set({ mood: 'idle' });
+    }
+  },
+  
+  toggleMenu: () => {
+    const isOpen = get().isMenuOpen;
+    if (isOpen) {
+      set({ isMenuOpen: false });
+    } else {
+      set({ isMenuOpen: true, mouseX: 0.5, mouseY: -1 }); // Position menu above Pingu
+    }
+  },
+  
+  closeMenu: () => set({ isMenuOpen: false }),
+  
+  showPingu: () => set({ isVisible: true }),
+  hidePingu: () => {
+    set({ isVisible: false, isMenuOpen: false });
+  },
+  
+  setCursorPos: (x: number, y: number) => {
+    // Clamp to -1..1 range for eye animation
+    const clampedX = Math.max(-1, Math.min(1, x));
+    const clampedY = Math.max(-1, Math.min(1, y));
+    set({ mouseX: clampedX, mouseY: clampedY });
+  },
+  
+  advanceMouthFrame: () => {
+    // Mouth animation during speaking — cycles through frames at ~8Hz (50ms per frame)
+    const current = get().mouthFrame;
+    set({ mouthFrame: (current + 1) % 6 });
+  },
+  
+  triggerBlink: () => {
+    if (!get().isBlinking) {
+      // Blink for ~200ms then reopen eyes
+      set({ isBlinking: true });
+      setTimeout(() => set({ isBlinking: false }), 200);
+    }
+  },
+  
+  updateBobSpeed: (speedMultiplier) => {
+    set({ bobSpeed: Math.max(0.5, Math.min(3, speedMultiplier)) });
+  },
+}));
+
+// ─── Convenience functions for mood transitions from other stores ──────────────
+
+/** Called when the agent starts generating a response */
+export function startSpeaking(): void {
+  usePinguStore.getState().setMood('speaking');
+  
+  // Start mouth animation loop — run at ~8Hz during speaking
+  let frameInterval: ReturnType<typeof setInterval>;
+  const startAnimation = () => {
+    frameInterval = setInterval(() => {
+      usePinguStore.getState().advanceMouthFrame();
+      // Also update bob speed while speaking (faster body bob)
+      usePinguStore.getState().updateBobSpeed(2);
+    }, 125); // ~8Hz
+  };
+  
+  startAnimation();
+  
+  // Stop animation when mood changes away from 'speaking'
+  const stopCheck = setInterval(() => {
+    if (usePinguStore.getState().mood !== 'speaking') {
+      clearInterval(frameInterval);
+      usePinguStore.getState().updateBobSpeed(1);
+      clearInterval(stopCheck);
+    }
+  }, 500);
+}
+
+/** Called when the agent is thinking but hasn't started speaking yet */
+export function startThinking(): void {
+  usePinguStore.getState().setMood('thinking');
+}
+
+/** Called when a task completes successfully */
+export function completeTask(): void {
+  // Happy for 2 seconds, then back to idle (handled by resetMood)
+  usePinguStore.getState().resetMood();
+  
+  // Play "Noot noot!" sound effect if enabled — handled by PinguAvatar component
+  try {
+    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQoGAAD/f39/+fj4/3l5eHd3dnV1dXRzc3JxcXFwcHBvb29vbm1tbGxra2pqaGhoaGdnZmZlZWVkZGRkY2NiYmFhYGBfX15eXFxYWFlYWFhWVlVUVEpLSkpKSkpKSUpKTExLTExLS0tLSEtLS0tLS0tLbCwsLCwsLCwMDAwLy8vLi4uLCwsKCgoJycmJiYmJiUlJSQkIyMjIyMjIyMiIiEhISAgHx8fHx8fHx8fHx4eHR0dHRwdHR0cHBvb29vbW1tbGxra2lpaWlsbCwsLCwqKioqKikpKSgoJycnJiYmJiYmJSUlJCQjIyMjIyMjIyIhISEgIB8fHx8fHx8eHh0dHRwcHBwcHBsbGxsbGRkZGRkZGRcXFxcXFRUVFRUVFBUVFBQUExMTExMTExMTExISEREQEA8PDw8PDw8PFhYWFhQUGRkZGRkZFhcXFxcVFhUWFRUVFBQUFBMTExMTExMTExISEhISEhMSEhISEhISEhISEhMTEhISEhISEhISEhMTEhISEhISEhISEhI=');
+    audio.volume = 0.3;
+    audio.play().catch(() => {}); // Silently ignore if autoplay blocked
+  } catch {
+    // Audio not available — skip
+  }
+}
+
+/** Called when an error occurs during task execution */
+export function handleTaskError(): void {
+  usePinguStore.getState().setMood('error');
+  
+  // Stay in error mood for ~5 seconds, then back to idle
+  setTimeout(() => usePinguStore.getState().resetMood(), 5000);
+}
+
+/** Called when the agent is executing a plan step (working state) */
+export function startWorking(): void {
+  usePinguStore.getState().setMood('working');
+  
+  // Update bob speed for working state (faster than idle but slower than speaking)
+  usePinguStore.getState().updateBobSpeed(1.5);
+  
+  // Transition back to idle after task completes — checked periodically by PinguAvatar
+}
+
+/** Called when the agent is idle and waiting */
+export function idle(): void {
+  const currentMood = usePinguStore.getState().mood;
+  if (currentMood === 'working' || currentMood === 'thinking') {
+    // Don't immediately transition — let natural transitions happen based on agent state
+    return;
+  }
+  
+  usePinguStore.getState().setMood('idle');
+}
+
+// ─── Periodic blink timer ──────────────
+let blinkInterval: ReturnType<typeof setInterval> | null = null;
+
+/** Start the periodic blink timer — call once during app initialization */
+export function startBlinkTimer(): void {
+  // Random interval between blinks — anywhere from 2 to 5 seconds
+  const scheduleNextBlink = () => {
+    const nextBlinkIn = Math.random() * (3000 - 1500) + 1500; // 1.5s to 3s after last blink
+    
+    blinkInterval = setTimeout(() => {
+      usePinguStore.getState().triggerBlink();
+      scheduleNextBlink();
+    }, nextBlinkIn);
+  };
+  
+  scheduleNextBlink();
+}
+
+/** Stop the periodic blink timer — call on app shutdown */
+export function stopBlinkTimer(): void {
+  if (blinkInterval) {
+    clearTimeout(blinkInterval);
+    blinkInterval = null;
+  }
+}

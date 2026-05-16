@@ -1,6 +1,6 @@
 // HuggingFace Model Manager — downloader panel + local model browser (Phase B)
 import React, { useState, useEffect } from 'react';
-import type { HFSession, DownloadProgress, QueuedDownload, HFModelInfo } from '../engine/hfClient';
+import type { HFSession, DownloadProgress, QueuedDownload, HFModelInfo, LocalModelInfo } from '../engine/hfClient';
 
 interface ModelManagerProps {
   onModelSelect: (modelId: string) => void;
@@ -9,16 +9,17 @@ interface ModelManagerProps {
 
 export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps) {
   const [activeTab, setActiveTab] = useState<'local' | 'huggingface'>('local');
-  const [localModels, setLocalModels] = useState<Array<{ name: string; path: string; sizeMB: number; loaded: boolean }>>([]);
+  const [localModels, setLocalModels] = useState<LocalModelInfo[]>([]);
   const [hfModels, setHFModels] = useState<HFModelInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [downloadQueue, setDownloadQueue] = useState<QueuedDownload[]>([]);
   const [auth, setAuth] = useState<HFSession | null>(null);
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
+  // Track which model's settings panel is open (path -> boolean)
+  const [openSettingsModelPath, setOpenSettingsModelPath] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check auth status on mount via IPC (would call window.api.hf.checkAuth in production)
     async function init() {
       try {
         const hfClient = await import('../engine/hfClient');
@@ -55,7 +56,6 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
     const hfClient = await import('../engine/hfClient');
     const dlId = hfClient.addToDownloadQueue(modelId);
     
-    // Update local queue immediately to show progress
     setDownloadQueue(prev => [...prev, {
       id: dlId,
       modelId,
@@ -64,13 +64,16 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
       queuedAt: Date.now(),
     }]);
     
-    // Start the actual download
     const result = await hfClient.downloadModel(modelId);
     
-    // Update queue with real progress data — this is how we wire it up properly
     setDownloadQueue(prev => prev.map(dl => 
       dl.modelId === modelId ? { ...dl, progress: result } : dl
     ));
+  }
+
+  // Toggle settings panel for a local model
+  function toggleSettingsForModel(path: string): void {
+    setOpenSettingsModelPath(openSettingsModelPath === path ? null : path);
   }
 
   return (
@@ -122,7 +125,14 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
         {activeTab === 'local' && (
           <>
             {localModels.map((model) => (
-              <ModelCard key={model.name} model={model} isCurrent={currentModel !== undefined && model.name.includes(currentModel)} onModelSelect={onModelSelect} />
+              <ModelCard 
+                key={model.name + model.path} 
+                model={model} 
+                isCurrent={currentModel !== undefined && model.path.includes(currentModel)} 
+                onModelSelect={onModelSelect}
+                openSettingsPanel={() => toggleSettingsForModel(model.path)}
+                settingsOpen={openSettingsModelPath === model.path}
+              />
             ))}
             {localModels.length === 0 && (
               <div className="text-sm text-[#a6adc8] opacity-70">No local models found. Download from HuggingFace tab.</div>
@@ -175,15 +185,21 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
 }
 
 interface ModelCardProps {
-  model?: { name: string; path: string; sizeMB: number; loaded: boolean };
+  model?: LocalModelInfo;
   hf?: { id: string; author: string; tags: string[]; downloads: number; likes: number };
   isCurrent?: boolean;
   onModelSelect?: (modelId: string) => void;
   onHFSelect?: (modelId: string) => void;
+  openSettingsPanel?: () => void;
+  settingsOpen?: boolean;
 }
 
-function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect }: ModelCardProps) {
+function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect, openSettingsPanel, settingsOpen }: ModelCardProps) {
   const [isDownloading, setIsDownloading] = useState(false);
+  // Per-model settings state (Phase F-1)
+  const [contextWindow, setContextWindow] = useState(0);
+  const [gpuLayers, setGpuLayers] = useState(-1);
+  const [threads, setThreads] = useState(-1);
 
   if (hf) {
     return (
@@ -208,12 +224,79 @@ function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect }: ModelCar
 
   return (
     <div className={`rounded bg-[#1e1e2e]/60 border p-3 ${isCurrent ? 'border-indigo-500/40' : 'border-[#45475a]'}`}>
+      {/* Header row */}
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm font-medium">{model?.name}</span>
-        {model?.loaded && (
-          <span className="text-xs px-1.5 py-0.5 rounded bg-green-900/40 text-green-300 border border-green-700/40">✓ Loaded</span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {/* Model load status — not tracked locally, only in chat store */}
+          {/* Settings toggle button — opens inline settings panel */}
+          <button 
+            onClick={() => openSettingsPanel?.()}
+            className="px-1.5 py-0.5 rounded bg-[#313244] hover:bg-[#45475a] text-xs transition"
+            title="Model settings (context window, GPU layers, threads)"
+          >
+            ⚙️
+          </button>
+        </div>
       </div>
+
+      {/* Inline per-model settings panel (Phase F-1) */}
+      {settingsOpen && model && (
+        <div className="mb-2 p-2 bg-[#181825]/60 border border-[#45475a] rounded">
+          <p className="text-xs text-[#a6adc8] mb-2 font-semibold">Model Settings</p>
+          
+          {/* Context Window */}
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs opacity-70">Context Window (tokens)</label>
+            <input 
+              type="number" 
+              value={contextWindow || ''} 
+              onChange={(e) => setContextWindow(parseInt(e.target.value) || 0)} 
+              placeholder="Auto-detect" 
+              min="0" 
+              className="w-24 bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[#cba6f7]"
+            />
+          </div>
+
+          {/* GPU Layers */}
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs opacity-70">GPU Layers</label>
+            <input 
+              type="number" 
+              value={gpuLayers === -1 ? '' : gpuLayers} 
+              onChange={(e) => setGpuLayers(parseInt(e.target.value) || 0)} 
+              placeholder="-1 = All" 
+              min="-1" 
+              max="999" 
+              className="w-24 bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[#cba6f7]"
+            />
+          </div>
+
+          {/* Threads */}
+          <div className="flex items-center justify-between">
+            <label className="text-xs opacity-70">CPU Threads</label>
+            <input 
+              type="number" 
+              value={threads === -1 ? '' : threads} 
+              onChange={(e) => setThreads(parseInt(e.target.value) || 0)} 
+              placeholder="-1 = Auto" 
+              min="-1" 
+              max="999" 
+              className="w-24 bg-[#1e1e2e] border border-[#45475a] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[#cba6f7]"
+            />
+          </div>
+
+          {/* Reset button */}
+          <button 
+            onClick={() => { setContextWindow(0); setGpuLayers(-1); setThreads(-1); }}
+            className="mt-2 text-xs text-[#f38ba8] hover:text-pink-300 transition"
+          >
+            Reset to defaults
+          </button>
+        </div>
+      )}
+
+      {/* Footer row */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs opacity-60">{model?.sizeMB} MB • GGUF</span>
         <div className="flex gap-1.5">

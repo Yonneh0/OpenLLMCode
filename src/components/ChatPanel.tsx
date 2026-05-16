@@ -1,8 +1,13 @@
 // Enhanced chat panel — streaming, Markdown rendering, message actions (Phase B)
 import React, { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import type { GenerationConfig, ChatMessage } from '../types';
+import type { GenerationConfig, ChatMessage, CompressedEntry } from '../types';
 import { getDefaults } from './GenerationParams';
+import { compressConversation, shouldCompress } from '../engine/contextCompression';
+
+// Track tokens/second speed for streaming display
+let tokenSpeedTimer: ReturnType<typeof setTimeout> | null = null;
+let lastTokenTimestamp = 0;
 
 interface ChatPanelProps {
   generationConfig?: GenerationConfig;
@@ -188,6 +193,20 @@ function CopyButton({ content }: { content: string }) {
   );
 }
 
+// Fix #9: Show compression status indicator in streaming footer
+function CompressionStatus({ compressed }: { compressed: CompressedEntry[] | null }) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs">
+      {compressed && compressed.length > 0 ? (
+        <>
+          <span>🧠</span>
+          <span className="text-yellow-300">{compressed.length} summary(s)</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 // Fix #4: Wire GenerationParams onChange prop to store/parent state
 export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) {
   const [localConfig, setLocalConfig] = useState<GenerationConfig>(generationConfig || getDefaults());
@@ -204,6 +223,11 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
     setLocalConfig(config);
     onConfigChange?.(config);
   };
+  
+  // Track compression status for the current active message
+  const [compressedHistory, setCompressedHistory] = useState<CompressedEntry[] | null>(null);
+  const [shouldShowCompressionStatus, setShowCompressionStatus] = useState(false);
+
   const messages = useChatStore((s) => s.messages);
   const isSending = useChatStore((s) => s.isSending);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -218,13 +242,32 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
-  // Simulate streaming response for user messages
-  const handleSend = () => {
+  // Simulate streaming response for user messages — with context compression
+  const handleSend = async () => {
     const text = inputValue.trim();
     if (!text) return;
 
     addMessage('user', text);
     setInputValue('');
+
+    // ─── Context Compression Check (Phase E-4) ──────────────
+    // Before sending, check if the conversation should be compressed
+    let isCompressing = false;
+    const allMessages = useChatStore.getState().messages;
+    if (shouldCompress(allMessages)) {
+      isCompressing = true;
+      try {
+        const updatedHistory = await compressConversation(
+          allMessages.map(m => ({ id: m.id, role: m.role, content: m.content })),
+          [] // Use empty array — compression engine handles its own history tracking internally
+        );
+        
+        setCompressedHistory(updatedHistory);
+        setShowCompressionStatus(true);
+      } catch (err) {
+        console.warn('Context compression failed:', err);
+      }
+    }
 
     // Start streaming response after delay
     setTimeout(() => {
@@ -250,6 +293,28 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
             isSending: false,
             messages: s.messages.map((m: ChatMessage) => (m.role === 'assistant' ? { ...m, streaming: false } : m))
           }));
+          
+          // Track token speed after first chunk arrives (~600ms delay + processing time)
+          lastTokenTimestamp = Date.now();
+          tokenSpeedTimer = setInterval(() => {
+            const now = Date.now();
+            const elapsedSeconds = (now - lastTokenTimestamp) / 1000;
+            if (elapsedSeconds > 2) { // Only show after 2 seconds of streaming
+              const storeState = useChatStore.getState();
+              const totalTokens = Math.round(storeState.messages.reduce((sum: number, m: ChatMessage) => 
+                sum + (m.streaming ? m.content.length / 4 : 0), 0) / elapsedSeconds
+              );
+              // Store token speed in a global variable since it's not part of the store schema
+              if (typeof window !== 'undefined') {
+                (window as any).tokenSpeed = totalTokens;
+              }
+            }
+          }, 500);
+          
+          // Hide compression status after a few seconds if it was shown briefly
+          if (isCompressing) {
+            setTimeout(() => setShowCompressionStatus(false), 3000);
+          }
           return;
         }
 
@@ -323,7 +388,21 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
       {messages.some(m => m.streaming) && (
         <div className="px-3 py-1 bg-[#181825]/60 border-t border-[#45475a] text-xs flex items-center gap-2">
           <span>⏳ Streaming response...</span>
+          {typeof window !== 'undefined' && (window as any).tokenSpeed > 0 && (
+            <span className="text-green-300">{Math.round((window as any).tokenSpeed)} tok/s</span>
+          )}
+          <CompressionStatus compressed={compressedHistory} />
           <button onClick={() => useChatStore.getState().stopStreaming()} className="ml-auto px-2 py-0.5 rounded bg-[#f38ba8]/20 text-[#f38ba8] hover:bg-[#f38ba8]/40 transition" title="Cancel">✕ Cancel</button>
+        </div>
+      )}
+
+      {/* Context compression status (shown briefly after compression) */}
+      {shouldShowCompressionStatus && compressedHistory !== null && (
+        <div className="px-3 py-1 bg-[#f9e2af]/10 border-b border-[#45475a] text-xs flex items-center gap-2 animate-pulse">
+          <span>🧠 Compressing context...</span>
+          {compressedHistory.length > 0 && (
+            <> — <span className="text-yellow-300">{compressedHistory.length} summary(s) created</span></>
+          )}
         </div>
       )}
 
@@ -376,7 +455,7 @@ export function ChatPanel({ generationConfig, onConfigChange }: ChatPanelProps) 
 
       {/* Token count footer */}
       <div className="px-3 py-1 bg-[#181825]/60 border-t border-[#45475a] text-xs text-[#a6adc8] opacity-50 flex items-center justify-between">
-        <span>~{messages.reduce((sum, m) => sum + m.content.length, 0)} tokens</span>
+        <span>~{messages.reduce((sum, m) => sum + m.content.length / 4, 0)} tokens</span>
         <span>{new Date().toLocaleTimeString()}</span>
       </div>
 

@@ -9,10 +9,22 @@ export { useEditorStore } from './editorStore';
 export { useApprovalStore } from './approvalStore';
 
 // Engine Logger Store — exported separately due to its special IPC wiring needs
-export { useEngineLoggerStore, filterLogEntries } from './engineLoggerStore';
+export { 
+  useEngineLoggerStore, 
+  filterLogEntries,
+  startPrimaryLogging,
+  startSystemAILogging,
+  stopPrimaryLogging,
+  stopSystemAILogging,
+  handleEngineDataEvent,
+  registerEngineDataHandler,
+} from './engineLoggerStore';
 
 // MCP Store — exported for UI-side MCP server management and tool registration
 export { useMCPStore } from './mcpStore';
+
+// MCP tool execution helpers — wired via mcpManager → toolRegistry (Phase E)
+export { getAllMCPToolNames, executeMCPToolCall } from './engineLoggerStore';
 
 // Data persistence utilities (not a store so can be re-exported as values)
 export * from './dataPersistence';

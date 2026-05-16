@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import ApprovalGate from './components/ApprovalGate';
 import CheckpointPanel from './components/CheckpointPanel';
 import TaskPanel from './components/TaskPanel';
-import McpPanel from './components/McpPanel';
+import { McpPanel } from './components/McpPanel';
 import { MonacoEditor } from './components/MonacoEditor';
 import { XTermTerminal } from './components/XTermTerminal';
 import { ProjectWizard } from './components/ProjectWizard';
@@ -11,7 +11,7 @@ import { ChatPanel } from './components/ChatPanel';
 import type { AgentMode, GenerationConfig } from './types';
 import { TitleBar } from './components/TitleBar';
 import { useFileTreeStore, FileItem } from './store/fileTreeStore';
-import { GenerationParams } from './components/GenerationParams';
+import { GenerationParamsPanel as GenerationParams } from './components/GenerationParams';
 
 // Mode labels — single source of truth for mode toggle display
 const MODE_LABELS: Record<AgentMode, string> = {
@@ -87,7 +87,7 @@ export function App() {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#1e1e2e] text-white font-sans">
       {/* Title bar — mode buttons and model selector */}
-      <TitleBar mode={mode} onModeChange={(m: AgentMode) => setMode(m)} />
+      <TitleBar mode={mode} onModeChange={(m: string) => setMode(m as AgentMode)} />
 
       {/* Main content: sidebar | editor + chat */}
       <main className="flex-1 flex min-h-0">

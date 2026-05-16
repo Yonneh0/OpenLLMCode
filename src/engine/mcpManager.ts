@@ -1,10 +1,13 @@
 // MCP Server Manager — discovers, registers, and manages MCP servers at runtime (Phase E)
-// Import both transport types — stdio for local servers, HTTP for remote servers
+// Import transport types — stdio for local servers, SSE/HTTP for remote servers
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 // Client is a runtime class (not a type) — must use import, not import type
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type { Tool, ClientCapabilities } from '@modelcontextprotocol/sdk/types.js';
+import type { Tool, ClientCapabilities, ServerCapabilities } from '@modelcontextprotocol/sdk/types.js';
+
+// Keepalive ping interval for SSE connections — prevents timeouts on idle connections
+const SSE_KEEPALIVE_INTERVAL = 30_000; // 30 seconds
 
 // Configuration for a single MCP server
 export interface MCPServerConfig {
@@ -34,6 +37,9 @@ export interface MCPServer {
 let registeredServers = new Map<string, MCPServer>();
 let connectedClients = new Map<string, Client>();
 let serverIdCounter = Date.now();
+
+// Track SSE keepalive intervals so we can clean them up on disconnect
+const sseIntervals = new Map<string, ReturnType<typeof setInterval>>();
 
 // ─── Built-in MCP servers (always available) ──────────────
 const BUILTIN_SERVERS: MCPServerConfig[] = [
@@ -110,16 +116,29 @@ export async function connectServer(config: MCPServerConfig): Promise<MCPServer>
       );
       await client.connect(transport);
     } else if (config.transport === 'http' && config.url) {
-      // HTTP transport — use StreamableHTTPClientTransport for remote MCP servers
-      const httpTransport = new StreamableHTTPClientTransport(
-        new URL(config.url),
-      );
+      // HTTP/SSE transport — use SSEClientTransport for remote MCP servers over SSE
+      const sseTransport = new SSEClientTransport(new URL(config.url));
 
       client = new Client(
         { name: `OpenLLMCode-client`, version: '0.1.0' },
         { capabilities: {} as ClientCapabilities }
       );
-      await client.connect(httpTransport);
+      
+      // Connect to the server — this establishes the HTTP connection and receives SSE events
+      await client.connect(sseTransport);
+      
+      // Start keepalive ping for SSE connection (prevents proxy/firewall timeouts)
+      const interval = setInterval(() => {
+        try {
+          // Use MCP ping to check if server is still alive
+          client.ping().catch(() => {});
+        } catch {
+          // Keepalive failed — server may have disconnected, cleanup handled by disconnectServer
+        }
+      }, SSE_KEEPALIVE_INTERVAL);
+      
+      // Store interval reference for cleanup during disconnect
+      sseIntervals.set(config.id, interval);
     } else {
       throw new Error('Invalid MCP server configuration');
     }
@@ -132,7 +151,7 @@ export async function connectServer(config: MCPServerConfig): Promise<MCPServer>
       inputSchema: t.inputSchema || {},
     }));
 
-    // Update server status with discovered tools
+    // Update server status with discovered tools and SSE capabilities
     registeredServers.set(config.id, { ...server, status: 'connected', tools });
     connectedClients.set(config.id, client);
 
@@ -146,9 +165,17 @@ export async function connectServer(config: MCPServerConfig): Promise<MCPServer>
 
 // Disconnect an MCP server and clean up resources — also removes its tools from the agent core
 export async function disconnectServer(serverId: string): Promise<boolean> {
+  // Clean up SSE keepalive interval if one exists for this server
+  const interval = sseIntervals.get(serverId);
+  if (interval) {
+    clearInterval(interval);
+    sseIntervals.delete(serverId);
+  }
+
   const client = connectedClients.get(serverId);
   if (client) {
     try {
+    // No-op for now — SSEClientTransport doesn't expose cancel(), cleanup handled by close()
       client.close();
     } catch {}
     connectedClients.delete(serverId);
@@ -178,9 +205,7 @@ async function unregisterServerToolsFromRegistry(serverId: string): Promise<void
     const mcpToolName = `${serverId}:${tool.name}`;
     
     try {
-      if (toolRegistry.unregisterTool) {
-        toolRegistry.unregisterTool(mcpToolName);
-      }
+      toolRegistry.unregisterTool(mcpToolName);
     } catch (err) {
       console.warn(`Failed to unregister MCP tool "${mcpToolName}" from tool registry:`, err);
     }
@@ -226,9 +251,6 @@ let mcpToolsRegistered = false;
  * and also manually when needed (e.g., during agent initialization).
  */
 export async function registerMCPToolsWithRegistry(): Promise<void> {
-  // Skip if already registered — avoid duplicate registrations
-  if (mcpToolsRegistered) return;
-
   // Dynamically import tool registry to avoid circular dependency at module load time
   const toolRegistry = await import('./toolRegistry.js');
 
@@ -241,7 +263,7 @@ export async function registerMCPToolsWithRegistry(): Promise<void> {
       // Check if already registered to avoid duplicates — use the same format as getMCPToolNames()
       const allNames = getMCPToolNames();
       if (allNames.includes(mcpToolName)) {
-        continue;
+        continue; // Already registered
       }
 
       // Build the parameter schema for the tool registry format
@@ -260,14 +282,12 @@ export async function registerMCPToolsWithRegistry(): Promise<void> {
 
       // Register with the agent's tool registry using the same format as built-in tools
       try {
-        if (toolRegistry.registerTool) {
-          toolRegistry.registerTool({
-            name: mcpToolName as any,  // ToolType will accept unknown types at runtime — MCP tools use "id:name" format
-            description: `[${server.name}] ${tool.description}`,
-            parameters,
-            defaultApproval: 'require', // MCP tools require approval by default (user must trust the server)
-          });
-        }
+        toolRegistry.registerTool({
+          name: mcpToolName as any,  // ToolType will accept unknown types at runtime — MCP tools use "id:name" format
+          description: `[${server.name}] ${tool.description}`,
+          parameters,
+          defaultApproval: 'require', // MCP tools require approval by default (user must trust the server)
+        });
       } catch (err) {
         console.warn(`Failed to register MCP tool "${mcpToolName}" with tool registry:`, err);
       }
@@ -276,6 +296,7 @@ export async function registerMCPToolsWithRegistry(): Promise<void> {
 
   mcpToolsRegistered = true;
 }
+
 /**
  * Unregister all MCP tools from the agent's tool registry.
  * Called when ALL servers disconnect (e.g., project close).
@@ -292,9 +313,7 @@ export async function unregisterMCPToolsFromRegistry(): Promise<void> {
       const mcpToolName = `${server.id}:${tool.name}`;
       
       try {
-        if (toolRegistry.unregisterTool) {
-          toolRegistry.unregisterTool(mcpToolName);
-        }
+        toolRegistry.unregisterTool(mcpToolName);
       } catch (err) {
         console.warn(`Failed to unregister MCP tool "${mcpToolName}" from tool registry:`, err);
       }

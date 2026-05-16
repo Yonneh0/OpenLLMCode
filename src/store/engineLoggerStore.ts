@@ -7,6 +7,10 @@ interface EngineLoggerState {
   primaryActiveSessionId: string | null;
   systemAIActiveSessionId: string | null;
   
+  // Local state for real-time log entry display — populated by IPC events during streaming
+  primaryLogEntries: EngineLogEntry[];
+  systemAILogEntries: EngineLogEntry[];
+  
   // Filter state for UI display
   logFilterLevel: LogLevel | 'all' | 'none';
   logSearchQuery: string;
@@ -32,6 +36,10 @@ export const useEngineLoggerStore = create<EngineLoggerState>((set, get) => ({
   primaryActiveSessionId: null,
   systemAIActiveSessionId: null,
   
+  // Real-time log entries stored locally from IPC events
+  primaryLogEntries: [],
+  systemAILogEntries: [],
+  
   logFilterLevel: 'all',
   logSearchQuery: '',
   
@@ -41,7 +49,7 @@ export const useEngineLoggerStore = create<EngineLoggerState>((set, get) => ({
     try {
       const result = await window.api.engineLogging.start('primary');
       if (result && typeof result === 'object' && 'sessionId' in result) {
-        set({ primaryActiveSessionId: String((result as any).sessionId) });
+        set({ primaryActiveSessionId: String((result as any).sessionId), primaryLogEntries: [] });
       }
     } catch (err) {
       console.error('Failed to start primary engine logging:', err);
@@ -52,7 +60,7 @@ export const useEngineLoggerStore = create<EngineLoggerState>((set, get) => ({
     try {
       const result = await window.api.engineLogging.start('systemAI');
       if (result && typeof result === 'object' && 'sessionId' in result) {
-        set({ systemAIActiveSessionId: String((result as any).sessionId) });
+        set({ systemAIActiveSessionId: String((result as any).sessionId), systemAILogEntries: [] });
       }
     } catch (err) {
       console.error('Failed to start System AI engine logging:', err);
@@ -65,6 +73,7 @@ export const useEngineLoggerStore = create<EngineLoggerState>((set, get) => ({
       set((s) => ({
         primaryActiveSessionId: engineId === 'primary' ? null : s.primaryActiveSessionId,
         systemAIActiveSessionId: engineId === 'systemAI' ? null : s.systemAIActiveSessionId,
+        // Keep log entries even after stopping — user can still review them
       }));
       return true;
     } catch {
@@ -84,7 +93,8 @@ export const useEngineLoggerStore = create<EngineLoggerState>((set, get) => ({
       return [];
     } catch (err) {
       console.error(`Failed to get log entries for ${engineId}:`, err);
-      return [];
+      // Return local cache if IPC fails
+      return engineId === 'primary' ? get().primaryLogEntries : get().systemAILogEntries;
     }
   },
 
@@ -180,19 +190,115 @@ export async function stopSystemAILogging(): Promise<boolean> {
   return Boolean(success);
 }
 
+// ─── IPC Event Handler for real-time log data from main process ──────────────
+// Called when the main process emits 'engine-logging-data' events during streaming
+export function handleEngineDataEvent(engineId: 'primary' | 'systemAI', _data: unknown): void {
+  // The raw data is forwarded by the main process — we parse it as JSON to extract log entries
+  try {
+    const rawData = typeof _data === 'string' ? _data : (typeof _data === 'object' && _data !== null) 
+      ? JSON.stringify(_data) 
+      : '';
+    
+    // Try parsing as a JSON log entry first
+    let logEntry: EngineLogEntry | null = null;
+    try {
+      const parsed = typeof _data === 'string' ? JSON.parse(_data) : _data;
+      if (parsed && typeof parsed === 'object') {
+        logEntry = {
+          id: String(parsed.id || `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
+          timestamp: Number(parsed.timestamp || Date.now()),
+          level: (String(parsed.level || 'info').toLowerCase()) as LogLevel,
+          message: String(parsed.message || ''),
+          source: engineId,
+        };
+      }
+    } catch {
+      // Not a JSON log entry — try parsing as raw text from stdout/stderr handler
+      const content = typeof _data === 'string' ? _data : (typeof _data === 'object' && _data !== null) 
+        ? JSON.stringify(_data) 
+        : '';
+      
+      if (content.trim()) {
+        // Infer log level from content patterns — stderr is always warn/error
+        const inferredLevel = content.startsWith('stderr:') || content.startsWith('error') || content.includes('Error') || content.includes('ERROR')
+          ? 'warn' as LogLevel 
+          : ('debug' as LogLevel);
+        
+        logEntry = {
+          id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: Date.now(),
+          level: inferredLevel,
+          message: content.slice(0, 500), // Truncate very long lines
+          source: engineId,
+        };
+      }
+    }
+    
+    if (logEntry && logEntry.message.trim()) {
+      setEngineLogEntries(engineId, prev => [...prev, logEntry!]);
+    }
+  } catch {
+    // Silently ignore malformed data — IPC transport may send non-log events
+  }
+}
+
+// Helper to safely update the local store state for engine log entries
+function setEngineLogEntries(
+  engineId: 'primary' | 'systemAI', 
+  updater: (prev: EngineLogEntry[]) => EngineLogEntry[]
+): void {
+  const current = engineId === 'primary' 
+    ? useEngineLoggerStore.getState().primaryLogEntries 
+    : useEngineLoggerStore.getState().systemAILogEntries;
+  
+  const updated = updater(current);
+  
+  // Enforce max entries limit (trim oldest)
+  const MAX_ENTRIES = 10000;
+  while (updated.length > MAX_ENTRIES) {
+    updated.shift();
+  }
+  
+  if (engineId === 'primary') {
+    useEngineLoggerStore.setState({ primaryLogEntries: updated });
+  } else {
+    useEngineLoggerStore.setState({ systemAILogEntries: updated });
+  }
+}
+
 // ─── Helper to get all available MCP tool names — wired via mcpManager → toolRegistry ──────────────
 export function getAllMCPToolNames(): string[] {
   // This will be populated by the agent core when MCP tools are registered.
-  // The actual implementation is in mcpManager.ts, but we return a placeholder here
-  // since the store doesn't have direct access to mcpManager state.
+  const mcpManager = require('../engine/mcpManager.js');
+  if (mcpManager && typeof mcpManager.getMCPToolNames === 'function') {
+    return mcpManager.getMCPToolNames();
+  }
+  // Fallback: empty list means no MCP tools are available yet
+  console.warn('MCP manager not loaded — cannot get tool names');
   return [];
 }
 
 // ─── Helper to call an MCP tool — wired via mcpManager → toolRegistry ──────────────
 export async function executeMCPToolCall(serverToolName: string, params?: Record<string, unknown>): Promise<any> {
-  // This will be handled by the agent core's tool registry integration.
-  // The actual implementation is in mcpManager.ts, but we return a placeholder here
-  // since the store doesn't have direct access to mcpManager state.
-  console.warn('MCP tool execution not yet wired from store — use mcpManager.callMCPTool() directly');
-  throw new Error(`MCP tool "${serverToolName}" is not registered with the agent core`);
+  const mcpManager = require('../engine/mcpManager.js');
+  if (mcpManager && typeof mcpManager.callMCPTool === 'function') {
+    return mcpManager.callMCPTool(serverToolName, params);
+  }
+  throw new Error(`MCP tool "${serverToolName}" is not available — MCP manager not loaded`);
+}
+
+// ─── Register the IPC event handler for engine data during app initialization ──────────────
+export function registerEngineDataHandler(): void {
+  if (typeof window === 'undefined') return; // Only on renderer
+  
+  const handlePrimary = handleEngineDataEvent.bind(null, 'primary');
+  const handleSystemAI = handleEngineDataEvent.bind(null, 'systemAI');
+  
+  try {
+    (window as any).api.engineLogging.onEngineData(handlePrimary);
+    // Also listen for systemAI — the main process sends same event type but with engineId field
+    (window as any).api.engineLogging.onLogEntry(handleSystemAI);
+  } catch (err) {
+    console.warn('Failed to register engine data handler:', err);
+  }
 }
