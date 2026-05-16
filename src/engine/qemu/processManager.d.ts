@@ -1,0 +1,31 @@
+import type { VMInstance, ArchitectureType, DiskFormatType, MachineInfo } from './types';
+export declare class QEMUProcessManager {
+    private instances;
+    buildArgs(config: any): string[];
+    private getDefaultMachine;
+    createVM(config: any): Promise<VMInstance>;
+    executeQMPCommand(vmId: string, command: string, args?: Record<string, unknown>): Promise<unknown>;
+    startVM(vmId: string): Promise<void>;
+    pauseVM(vmId: string): Promise<void>;
+    resumeVM(vmId: string): Promise<void>;
+    stopVM(vmId: string): Promise<void>;
+    deleteVM(vmId: string): Promise<void>;
+    getVMStatus(vmId: string): Promise<unknown>;
+    hotplugCPU(vmId: string, socketId: number): Promise<void>;
+    addMemory(vmId: string, sizeBytes: number): Promise<void>;
+    queryBlockDevices(vmId: string): Promise<unknown>;
+    createSnapshot(vmId: string, driveId: string): Promise<string>;
+    getAvailableMachines(arch: ArchitectureType): Promise<MachineInfo[]>;
+    createDiskImage(format: DiskFormatType, sizeMB: number, path: string): Promise<void>;
+    convertDiskImage(srcFormat: DiskFormatType, dstFormat: DiskFormatType, srcPath: string, dstPath: string): Promise<void>;
+    getAvailableCPUs(arch: ArchitectureType): Promise<string[]>;
+    checkKVMAvailability(): Promise<boolean>;
+    getAvailableNetBackends(): Promise<string[]>;
+    getInstanceCount(): Promise<number>;
+    getRunningInstances(): Promise<VMInstance[]>;
+    cleanupAll(): void;
+    getInstances(): Map<string, VMInstance>;
+    getInstance(vmId: string): VMInstance | undefined;
+    private executeCommand;
+}
+export declare function getQEMUManager(): QEMUProcessManager;

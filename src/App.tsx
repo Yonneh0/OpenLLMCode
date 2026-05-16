@@ -19,6 +19,7 @@ import { GenerationParamsPanel as GenerationParams } from './components/Generati
 import { NotificationOverlay } from './components/NotificationOverlay';
 import { AppUpdateDialog, useAutoAppUpdateCheck } from './components/AppUpdateDialog';
 import { usePinguStore } from './store/pinguStore';
+import VMCreationWizard from './components/VMCreationWizard';
 
 // Default generation config — used as the source of truth for all panels
 const DEFAULT_CONFIG: GenerationConfig = {
@@ -87,6 +88,9 @@ export function App() {
   
   // P2-C: Show skills panel in sidebar (toggle button)
   const [showSkillsPanel, setShowSkillsPanel] = useState(false);
+
+  // QEMU VM Creation Wizard
+  const [vmWizardOpen, setVmWizardOpen] = useState(false);
 
   // Activity bar active tab state
   const [activeActivityId, setActiveActivityId] = useState('explorer');
@@ -176,7 +180,7 @@ export function App() {
             {/* QEMU VMs — live from store state */}
             {sidebarActiveTab === 'vm' && (
               <div className="flex-1 overflow-y-auto border-t border-[#404040]">
-                <VMPanel />
+                <VMPanel onOpenVmWizard={() => setVmWizardOpen(true)} />
               </div>
             )}
 
@@ -252,6 +256,9 @@ export function App() {
 
       {/* Project Creation Wizard */}
       <ProjectWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
+
+      {/* QEMU VM Creation Wizard — opened from VMPanel "+ Create VM" button or empty state */}
+      <VMCreationWizard isOpen={vmWizardOpen} onClose={() => setVmWizardOpen(false)} />
 
       {/* Pingu Avatar — System AI mascot in corner of UI (positioned via CSS absolute) */}
       <PinguAvatar position="bottom-right" />

@@ -652,25 +652,51 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
   // ─── QEMU/KVM Simulation Layer IPC handlers ──────────────────────────────
   
   // Helper to get the QEMU manager instance (lazy init via dynamic import)
-  async function getQemuManager(): Promise<typeof import('../src/engine/qemu/processManager').getQEMUManager> {
+  async function getQemuManager(): Promise<any> {  // eslint-disable-line @typescript-eslint/no-explicit-any — consistent with engineLogger pattern above
     if (!qemuManager) {
       const pm = await import('../src/engine/qemu/processManager');
       qemuManager = pm.getQEMUManager();
     }
-    return (qemuManager as any); // Use `as any` to avoid type issues with dynamic imports — consistent with how engineLogger pattern works above
+    return (qemuManager as any);  // eslint-disable-line @typescript-eslint/no-explicit-any — consistent with engineLogger pattern above
   }
 
-  async function getToolchainMgr(): Promise<typeof import('../src/engine/qemu/toolchainRegistry').getToolchainRegistry> {
+  async function getToolchainMgr(): Promise<any> {  // eslint-disable-line @typescript-eslint/no-explicit-any — same reason
     if (!toolchainManager) {
       const tm = await import('../src/engine/qemu/toolchainRegistry');
       toolchainManager = tm.getToolchainRegistry();
     }
-    return (toolchainManager as any);
+    return (toolchainManager as any);  // eslint-disable-line @typescript-eslint/no-explicit-any — same reason
   }
 
   // QEMU VM lifecycle handlers — same pattern as existing llama.cpp/System AI IPC patterns above
   ipcMain.handle('qemu-vm-create', async (_e: any, config: Record<string, unknown>) => {
     const mgr = await getQemuManager();
+    
+    // Create new disk images before starting the VM (for disks marked isNew=true in wizard)
+    const diskImages = (config as any).diskImages as any[] | undefined;  // eslint-disable-line @typescript-eslint/no-explicit-any — config at runtime
+    if (Array.isArray(diskImages)) {
+      for (const disk of diskImages) {
+        if (disk.isNew && !disk.file) {
+          // Create a new qcow2 disk image via qemu-img before VM creation
+          const tmpDir = process.env.TEMP || '/tmp';
+          const diskPath = pathModule.join(tmpDir, `openllmcode-${config.id}-${Date.now()}.qcow2`);
+          
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any — disk.format is any at runtime
+            await mgr.createDiskImage('qcow2' as any, 4096, diskPath);  // 4GB default disk — eslint-disable-line @typescript-eslint/no-explicit-any — format type cast at runtime (per QEMU docs)
+            
+            // Update config with the new disk path
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any — modifying config record at runtime
+            const mutableConfig = { ...config, diskImages: [...(diskImages as any[]).map((d: any) => d.id === disk.id ? { ...d, file: diskPath } : d)] };  // eslint-disable-line @typescript-eslint/no-explicit-any — modifying config record at runtime
+            (mutableConfig as any).diskImages = (diskImages as any[]).map((d: any) => d.id === disk.id ? { ...d, file: diskPath } : d);  // eslint-disable-line @typescript-eslint/no-explicit-any — same reason
+          } catch (err) {
+            console.error(`Failed to create new disk image ${disk.id}:`, err);
+            throw new Error(`Could not create required disk image: ${err}`);
+          }
+        }
+      }
+    }
+    
     return await mgr.createVM(config);
   });
 
@@ -779,6 +805,12 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
   ipcMain.handle('qemu-output-stream', async (_e: any) => {
     // Returns true if a new stream subscription is created for this renderer process
     return { subscribed: true };
+  });
+
+  // Instance creation notification — send to all renderers when a new VM is created (F.1)  
+  ipcMain.handle('qemu-instance-created', (_e: any, instanceId: string) => {
+    mainWindow?.webContents.send('qemu-instance-created', { vmId: instanceId });
+    return true;
   });
 
   // Toolchain management — per-architecture toolchain download and caching from cross-compile docs  

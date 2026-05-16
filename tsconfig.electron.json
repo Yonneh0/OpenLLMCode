@@ -14,9 +14,9 @@
     "allowJs": true,
     "noEmitOnError": false,
     "declaration": true,
-    "outDir": "./dist/electron",
-    "rootDir": "./electron"
+    "rootDir": ".",
+    "outDir": "./dist"
   },
-  "include": ["./electron/main.ts"],
+  "include": ["./electron/main.ts", "../src/engine/qemu/*.ts"],
   "exclude": ["node_modules"]
 }

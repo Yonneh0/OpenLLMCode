@@ -6,6 +6,79 @@ export interface AppConfig { backend?: string; binarySource?: string; selectedMo
 // ─── Exported types for renderer use ──────────────────────────────
 export type Callback = (msg: unknown) => void;
 
+// ─── API interface namespace — used by Window.api in the global declaration below ──────────────────────────────
+export interface Api {
+  engine: {
+    getConfig: () => Promise<AppConfig>;
+    setConfig: (cfg: AppConfig) => Promise<void>;
+    detectHardware: () => Promise<{ os: string }>;
+  };
+  fs: {
+    readFile: (filePath: string) => Promise<string | null>;
+    writeFile: (filePath: string, content: string) => Promise<boolean>;
+    getProjectRoot: () => Promise<string>;
+    setProjectRoot: (rootPath: string) => Promise<void>;
+    readTree: () => Promise<unknown[]>;
+    startWatcher: () => Promise<boolean>;
+    stopWatcher: () => Promise<boolean>;
+    onFileTreeChanged: (callback: Callback) => () => void;
+    deleteFile: (filePath: string) => Promise<boolean>;
+    searchFiles: (payload: { path: string; regex: string; filePattern?: string }) => Promise<string>;
+    glob: (payload: { pattern: string; path?: string }) => Promise<string>;
+  };
+  terminal: {
+    spawn: () => Promise<string>;
+    write: (sessionId: string, data: string) => Promise<boolean>;
+    resize: (sessionId: string, cols: number, rows: number) => Promise<boolean>;
+    kill: (sessionId: string) => Promise<boolean>;
+    onData: (callback: Callback) => () => void;
+  };
+  execCommand: (command: string) => Promise<string | null>;
+  git: {
+    commit: (message: string) => Promise<unknown>;
+    getHeadHash: () => Promise<string>;
+    createCheckpoint: (label: string) => Promise<string>;
+    restoreToCheckpoint: (checkpointHash: string) => Promise<boolean>;
+    squashCommits: (commitMessage: string, count?: number) => Promise<boolean>;
+    stash: () => Promise<boolean>;
+    stashPop: () => Promise<boolean>;
+    hasUncommitted: () => Promise<boolean>;
+  };
+  chat: {
+    start: (payload: Record<string, unknown>) => Promise<unknown>;
+    sendMessage: (message: string) => Promise<unknown>;
+    stop: () => Promise<void>;
+    onMessage: (callback: Callback) => () => void;
+  };
+  systemAI: {
+    start: (modelPath: string) => Promise<boolean>;
+    sendMessage: (message: string) => Promise<unknown>;
+    stop: () => Promise<void>;
+  };
+  dialog: {
+    selectFolder: (parentWindow?: any) => Promise<string | null>;
+    selectFile: (parentWindow?: any) => Promise<string | null>;
+  };
+  electronStore: {
+    getConfig: () => Promise<Record<string, unknown>>;
+    setConfig: (key: string, value: unknown) => Promise<boolean>;
+  };
+  approval: {
+    onApprovalRequest: (callback: Callback) => () => void;
+  };
+  engineLogging: {
+    start: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
+    stop: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
+    getLogEntries: (engineId: 'primary' | 'systemAI', includeDisk?: boolean) => Promise<unknown[]>;
+    clearLogEntries: (engineId: 'primary' | 'systemAI') => Promise<void>;
+    getConfig: () => Promise<Record<string, unknown>>;
+    setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => Promise<boolean>;
+    onEngineData: (callback: Callback) => () => void;
+    onLogEntry: (callback: Callback) => () => void;
+  };
+  appShutdown: () => Promise<void>;
+}
+
 // QEMU/KVM Simulation Layer API types — mirrors the IPC handler signatures in preload.ts  
 export interface QemuAPI {
   // VM lifecycle operations
@@ -54,12 +127,12 @@ export interface QemuAPI {
   getProjectToolchains: (projectDir: string) => Promise<Record<string, unknown>>;
 }
 
+// ─── Global window.api augmentation — Api + optional QEMU namespace ──────────────────────────────
 declare global {
   interface Window {
-    api: import('./preload').Api & { qemu?: QemuAPI };
+    api: Api & { qemu?: QemuAPI };
   }
 }
-type Callback = (msg: unknown) => void;
 
 contextBridge.exposeInMainWorld('api', {
   // Engine Manager

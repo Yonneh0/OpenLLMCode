@@ -151,8 +151,17 @@ const VMInstanceCard: React.FC<VMInstanceCardProps> = ({ vm }) => {
   );
 };
 
-// ─── VM Panel Component (default export) ──────────────────────────────
-const VMPanel: React.FC = () => {
+// ─── Global callback for opening the QEMU VM Creation Wizard ──────────────
+let _vmWizardCallback: (() => void) | null = null;
+
+interface VMPanelProps {
+  onOpenVmWizard?: () => void;
+}
+
+const VMPanel: React.FC<VMPanelProps> = ({ onOpenVmWizard }) => {
+  // Set the global callback for VM creation from parent component
+  if (onOpenVmWizard) _vmWizardCallback = onOpenVmWizard;
+
   const instances = useVMStore((s) => s.instances);
   const loading = useVMStore((s) => s.loading);
   const setInstances = useVMStore((s) => s.setInstances);
@@ -224,16 +233,24 @@ const VMPanel: React.FC = () => {
             <p className="text-[11px] text-[#858585] mt-2">No VMs running</p>
           </div>
         )}
+
+        {/* Create VM button — always shown */}
+        <button
+          onClick={() => {
+            if (_vmWizardCallback) _vmWizardCallback();
+          }}
+          className="w-full px-3 py-2 rounded bg-[#404040] hover:bg-[#505050] text-xs transition flex items-center justify-center gap-1.5"
+        >
+          <span>+</span> Create VM
+        </button>
       </div>
 
-      {/* Bottom toolbar — action buttons */}
+      {/* Bottom toolbar — action buttons (only when VMs exist) */}
       {vmList.length > 0 && (
         <div className="flex gap-1.5 px-1 pt-2 border-t border-[#404040]">
           <button
-            onClick={async () => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any — dialog types incomplete in Electron IPC bridge
-              const result = (window as any).api?.dialog?.selectFolder?.(undefined);  // eslint-disable-line @typescript-eslint/no-explicit-any — same reason
-              if (result) alert(`VM creation from ${result} — not yet implemented`);
+            onClick={() => {
+              if (_vmWizardCallback) _vmWizardCallback();
             }}
             className="flex-1 px-2 py-1 rounded bg-[#404040] hover:bg-[#505050] text-xs transition"
           >
