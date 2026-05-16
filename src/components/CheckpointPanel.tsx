@@ -1,17 +1,33 @@
-// CheckpointPanel — Cline-style checkpoint rollback panel
+// CheckpointPanel — Cline-style checkpoint rollback panel (self-contained, no parent props needed)
 import React from 'react';
 import { useTaskStore } from '../store/taskStore';
 
-interface CheckpointPanelProps {
-  onRestore: (checkpointHash: string) => void;
-  onDeleteContextAfter: (checkpointId: string) => void;
-}
-
-const CheckpointPanel: React.FC<CheckpointPanelProps> = ({ onRestore, onDeleteContextAfter }) => {
+const CheckpointPanel: React.FC = () => {
   const { currentTask } = useTaskStore();
   const [expandedCp, setExpandedCp] = React.useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = React.useState(false);
   const [newLabel, setNewLabel] = React.useState('');
+
+  // Restore to checkpoint via IPC
+  const handleRestoreCheckpoint = async (checkpointHash: string) => {
+    if (!checkpointHash) return;
+    try { await window.api.git.restoreToCheckpoint(checkpointHash); } catch {}
+  };
+
+  // Delete context after checkpoint (UI-only — actual message truncation happens in store)
+  const handleDeleteContextAfter = (checkpointId: string) => {
+    useTaskStore.getState().deleteContextAfterCheckpoint(checkpointId);
+  };
+
+  // Create checkpoint via IPC
+  const handleCreateCheckpoint = async () => {
+    if (!newLabel.trim()) return;
+    try {
+      await window.api.git.createCheckpoint(newLabel.trim());
+      setShowCreateDialog(false);
+      setNewLabel('');
+    } catch {}
+  };
 
   if (!currentTask || currentTask.checkpoints.length === 0) {
     return (
@@ -51,8 +67,8 @@ const CheckpointPanel: React.FC<CheckpointPanelProps> = ({ onRestore, onDeleteCo
           isCurrent={idx === currentTask.checkpoints.length - 1}
           expanded={expandedCp === cp.id}
           onToggleExpand={() => setExpandedCp(expandedCp === cp.id ? null : cp.id)}
-          onRestore={() => onRestore(cp.gitCommitHash)}
-          onDeleteContextAfter={() => onDeleteContextAfter(cp.id)}
+          onRestore={() => handleRestoreCheckpoint(cp.gitCommitHash)}
+          onDeleteContextAfter={() => handleDeleteContextAfter(cp.id)}
         />
       ))}
 
@@ -63,8 +79,8 @@ const CheckpointPanel: React.FC<CheckpointPanelProps> = ({ onRestore, onDeleteCo
 
       {/* Create checkpoint dialog */}
       {showCreateDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-[#313244] rounded-xl shadow-2xl border border-[#45475a] max-w-sm w-full mx-4 p-5 space-y-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCreateDialog(false)}>
+          <div className="bg-[#313244] rounded-xl shadow-2xl border border-[#45475a] max-w-sm w-full mx-4 p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-[#cdd6f4]">Create Checkpoint</h3>
             <input
               type="text"
@@ -76,12 +92,7 @@ const CheckpointPanel: React.FC<CheckpointPanelProps> = ({ onRestore, onDeleteCo
             />
             <div className="flex gap-2">
               <button
-                onClick={() => {
-                  // Trigger IPC to create checkpoint — handled by parent component
-                  if (newLabel.trim()) onRestore(''); // placeholder; actual creation via IPC
-                  setShowCreateDialog(false);
-                  setNewLabel('');
-                }}
+                onClick={handleCreateCheckpoint}
                 className="flex-1 px-4 py-2 bg-[#a6e3a1]/20 hover:bg-[#a6e3a1]/30 text-[#a6e3a1] rounded-lg font-medium text-sm transition-colors"
               >
                 Create

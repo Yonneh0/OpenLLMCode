@@ -14,7 +14,38 @@ export class SystemAIClient {
     );
   }
 
-  // Strict system prompt for the System AI
+  /**
+   * Build the complete system prompt including compressed context if available.
+   */
+  private buildSystemPrompt(compressedContext?: { preamble: string; activeMessages: Array<{ role: string; content: string }> }): string {
+    let basePrompt = `You are the UI Assistant for OpenLLMCode. Your role is limited to project management, settings configuration, and engine compilation ONLY. You run on CPU and must be efficient.
+
+ALLOWED ACTIONS:
+- Clone repositories from Git providers
+- Extract template archives into project folders
+- Navigate and manage file trees
+- Configure engine backends and model settings
+- Manage HuggingFace authentication tokens
+- Execute Git operations (commit, squash, unstage)
+- Install compilers and SDKs for llama.cpp compilation
+- Run CMake builds with hardware-specific flags
+- Summarize conversation history for context compression
+
+DENIED ACTIONS:
+- Code generation or modification of source files
+- Complex reasoning about code architecture
+- Terminal command execution beyond project setup & compilation
+- Any action that modifies application logic
+- Network access outside explicitly allowed URLs`;
+
+    // If compressed context is available, prepend it to the system prompt
+    if (compressedContext && compressedContext.preamble) {
+      basePrompt = `${basePrompt}\n\n---\nEARLIER SESSION CONTEXT:\n${compressedContext.preamble}`;
+    }
+
+    return basePrompt;
+  }
+
   private getSystemPrompt(): string {
     return `You are the UI Assistant for OpenLLMCode. Your role is limited to project management, settings configuration, and engine compilation ONLY. You run on CPU and must be efficient.
 
@@ -50,7 +81,14 @@ DENIED ACTIONS:
     });
   }
 
-  async sendMessage(message: string): Promise<string> {
+  /**
+   * Send a message to the System AI with optional compressed context.
+   * Used for context compression, project management, and engine compilation tasks.
+   */
+  async sendMessage(
+    message: string, 
+    options?: { compressedContext?: { preamble: string; activeMessages: Array<{ role: string; content: string }> } }
+  ): Promise<string> {
     if (!this.process) await this.start();
 
     // Guard: ensure process is initialized before accessing stdin/stdout
@@ -61,7 +99,9 @@ DENIED ACTIONS:
 
     const fullMessage = JSON.stringify({
       type: 'message',
-      system_prompt: this.getSystemPrompt(),
+      system_prompt: options?.compressedContext 
+        ? this.buildSystemPrompt(options.compressedContext)
+        : this.getSystemPrompt(),
       message,
     });
 

@@ -33,6 +33,9 @@ export type ToolType =
   | 'terminal_read_output'
   | 'terminal_kill_process';
 
+/** MCP tool names use the "serverId:toolName" format, which is distinct from built-in ToolType */
+export type MCPToolName = `${string}:${string}`;
+
 export interface ToolCall {
   id: string;
   type: ToolType;
@@ -103,8 +106,11 @@ export interface ApprovalRequest {
 }
 
 // ─── Tool Registry Types ──────────────────────────────────────
+/** Either a built-in tool type or an MCP server's tool (format: "serverId:toolName") */
+type ToolName = ToolType | MCPToolName;
+
 export interface ToolDefinition {
-  name: ToolType;
+  name: ToolName;
   description: string;
   parameters: Record<string, { type: string; required: boolean; description?: string }>;
   defaultApproval: 'auto' | 'require'; // auto = no approval needed, require = always prompt
@@ -120,6 +126,10 @@ export interface ApprovalRulesConfig {
   categories: Record<string, ApprovalRuleCategory>;
 }
 
+// ─── Clone Auth Method ──────────────────────────────────────
+/** Authentication method for cloning private repositories */
+export type CloneAuthMethod = 'ssh' | 'pat' | 'token';
+
 // ─── Engine Types ──────────────────────────────────────────────
 export type Backend = 'cpu' | 'cuda' | 'metal' | 'vulkan' | 'rocm';
 
@@ -130,6 +140,17 @@ export interface EngineConfig {
   systemAIModel: string;
 }
 
+// ─── Model Settings Per Entry ──────────────────────────────────────
+/** Per-model inference settings — stored alongside each model entry */
+export interface ModelSettings {
+  /** Context window size in tokens (0 = auto-detect from GGUF header) */
+  contextWindow: number;
+  /** Number of GPU layers to offload (0 = all, -1 = none/CPU-only) */
+  gpuLayers: number;
+  /** Number of CPU threads for inference (-1 = auto) */
+  threads: number;
+}
+
 // ─── Model Types ──────────────────────────────────────────────
 export interface ModelInfo {
   id: string;
@@ -138,4 +159,6 @@ export interface ModelInfo {
   path: string;
   loaded: boolean;
   backend: Backend;
+  /** Per-model inference settings */
+  settings?: ModelSettings;
 }

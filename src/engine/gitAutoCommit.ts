@@ -91,7 +91,7 @@ export function getRecentCommits(count: number = 10, projectPath: string = DEFAU
       'log', '--format=%H %s', `-n`, String(count),
     ], { cwd: projectPath, encoding: 'utf-8' }).stdout;
 
-    return output.trim().split('\n').map(line => {
+    return output.trim().split('\n').map((line: string) => {
       const parts = line.split(' ');
       return { hash: parts[0], message: parts.slice(1).join(' ') };
     });

@@ -18,9 +18,60 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
   const [tokenInput, setTokenInput] = useState('');
 
   useEffect(() => {
-    // Check auth status on mount (would call window.api.hf.checkAuth in production)
-    setAuth({ token: 'hf_dummy', method: 'browser' });
+    // Check auth status on mount via IPC (would call window.api.hf.checkAuth in production)
+    async function init() {
+      try {
+        const hfClient = await import('../engine/hfClient');
+        
+        // Load local models from disk
+        const models = await hfClient.listLocalModels();
+        setLocalModels(models.map(m => ({ ...m, loaded: false })));
+        
+        // Check HF auth status
+        const session = await hfClient.checkHFAuth();
+        if (session) {
+          setAuth(session);
+        }
+      } catch (err) {
+        console.warn('Failed to initialize ModelManager:', err);
+      }
+    }
+    
+    init();
+    
+    // Poll download queue for real-time updates every second
+    const interval = setInterval(async () => {
+      try {
+        const hfClient = await import('../engine/hfClient');
+        setDownloadQueue(hfClient.getDownloadQueue());
+      } catch {}
+    }, 1000);
+    
+    return () => clearInterval(interval);
   }, []);
+
+  // Trigger download of a selected model from HuggingFace tab
+  async function handleHFModelSelect(modelId: string) {
+    const hfClient = await import('../engine/hfClient');
+    const dlId = hfClient.addToDownloadQueue(modelId);
+    
+    // Update local queue immediately to show progress
+    setDownloadQueue(prev => [...prev, {
+      id: dlId,
+      modelId,
+      fileName: undefined,
+      progress: { modelId, fileName: '*', downloadedBytes: 0, totalBytes: 0, speedMBps: 0, etaSeconds: -1, status: 'downloading' },
+      queuedAt: Date.now(),
+    }]);
+    
+    // Start the actual download
+    const result = await hfClient.downloadModel(modelId);
+    
+    // Update queue with real progress data — this is how we wire it up properly
+    setDownloadQueue(prev => prev.map(dl => 
+      dl.modelId === modelId ? { ...dl, progress: result } : dl
+    ));
+  }
 
   return (
     <div className="bg-[#1e1e2e] border-l border-[#45475a] flex flex-col w-80">
@@ -79,12 +130,20 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
           </>
         )}
 
-        {activeTab === 'huggingface' && searchQuery && (
+        {activeTab === 'huggingface' && (searchQuery || true) && (
           <>
-            {/* Placeholder model cards — in production, these come from searchModels() */}
-            <ModelCard hf={true} />
-            <ModelCard hf={true} />
-            <ModelCard hf={true} />
+            {/* Real model cards from searchModels() — will be populated when the user types */}
+            {hfModels.map(model => (
+              <ModelCard 
+                key={model.id} 
+                hf={{ id: model.id, author: model.author, tags: model.tags, downloads: model.downloads, likes: model.likes }} 
+                isCurrent={currentModel !== undefined && currentModel.includes(model.id)}
+                onHFSelect={handleHFModelSelect}
+              />
+            ))}
+            {searchQuery && hfModels.length === 0 && (
+              <div className="text-sm text-[#a6adc8] opacity-70">No models found for "{searchQuery}". Try a different search term.</div>
+            )}
           </>
         )}
       </div>
@@ -115,24 +174,31 @@ export function ModelManager({ onModelSelect, currentModel }: ModelManagerProps)
   );
 }
 
-function ModelCard({ model, hf, isCurrent, onModelSelect }: {
+interface ModelCardProps {
   model?: { name: string; path: string; sizeMB: number; loaded: boolean };
-  hf?: boolean;
+  hf?: { id: string; author: string; tags: string[]; downloads: number; likes: number };
   isCurrent?: boolean;
   onModelSelect?: (modelId: string) => void;
-}) {
+  onHFSelect?: (modelId: string) => void;
+}
+
+function ModelCard({ model, hf, isCurrent, onModelSelect, onHFSelect }: ModelCardProps) {
   const [isDownloading, setIsDownloading] = useState(false);
 
   if (hf) {
     return (
       <div className="rounded bg-[#1e1e2e]/60 border border-[#45475a] p-3 hover:border-[#cba6f7]/40 transition cursor-pointer">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-sm font-medium">📁 Gemma-4-E4B-Uncensored-Q8_0</span>
+          <span className="text-sm font-medium">📁 {hf.id.split('/').pop() || 'Unknown'}</span>
           {isCurrent && <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 border border-indigo-700/40">✓ Loaded</span>}
         </div>
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs opacity-60">GGUF • Q8_0 • 1.9 GB</span>
-          <button onClick={() => setIsDownloading(true)} className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#f9e2af]/30 text-[#a67c5b]' : 'bg-[#cba6f7] hover:bg-[#b4befe] text-black'}`}>
+          <button 
+            onClick={() => onHFSelect?.(hf.id)} 
+            disabled={isDownloading}
+            className={`px-3 py-1 rounded text-xs font-medium transition ${isDownloading ? 'bg-[#f9e2af]/30 text-[#a67c5b]' : 'bg-[#cba6f7] hover:bg-[#b4befe] text-black'}`}
+          >
             {isDownloading ? '⬇ Downloading...' : '▶ Download'}
           </button>
         </div>

@@ -97,9 +97,35 @@ const BUILTIN_TOOLS: ToolDefinition[] = [
 // ─── Tool registry state ──────────────
 let tools = new Map<string, ToolDefinition>(BUILTIN_TOOLS.map(t => [t.name, t]));
 
+/** Check if a tool name follows the MCP format (serverId:toolName). */
+function isMCPTOOL(name: string): boolean {
+  return name.includes(':');
+}
+
 // Register a custom tool (for MCP or skill extensions)
 export function registerTool(def: ToolDefinition): void {
+  const existing = tools.get(def.name);
+  
+  // Only skip if there's an existing non-MCP tool — allows MCP/skill tools to always be (re)registered
+  if (existing && !isMCPTOOL(def.name)) return;
+  
+  // Allow MCP/skill tools to always be (re)registered, even over built-in conflicts
   tools.set(def.name, def);
+}
+
+/**
+ * Unregister a custom tool (for MCP or skill extensions).
+ * Removes the tool from the registry so it's no longer available to the agent.
+ */
+export function unregisterTool(name: string): void {
+  // Don't allow unregistration of built-in tools — only MCP/skill extensions can be removed
+  const existing = tools.get(name);
+  if (!existing) return;
+  
+  // Only remove MCP or skill tools (those that aren't in the built-in list)
+  if (!BUILTIN_TOOLS.some(b => b.name === name)) {
+    tools.delete(name);
+  }
 }
 
 // Get the schema for a specific tool

@@ -27,14 +27,14 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('file-tree-changed', handler);
     },
 
-    // Phase C — File search & glob, deletion
+    // File search & glob, deletion
     deleteFile: (filePath: string) => ipcRenderer.invoke('fs-delete-file', filePath),
     searchFiles: (payload: { path: string; regex: string; filePattern?: string }) =>
       ipcRenderer.invoke('fs-search-files', payload),
     glob: (payload: { pattern: string; path?: string }) =>
       ipcRenderer.invoke('fs-glob', payload),
 
-    // Phase C — File tree operations via IPC (for agent tools)
+    // File tree operations via IPC (for agent tools)
     searchFilesIPC: async (searchPath: string, regex: string, filePattern?: string): Promise<string> => {
       const result = await ipcRenderer.invoke('fs-search-files', { path: searchPath, regex, filePattern });
       return result || '';
@@ -57,15 +57,15 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('terminal-data', handler);
     },
   },
-  execCommand: (command: string) => ipcRenderer.invoke('exec-command', command), // legacy
+  execCommand: (command: string) => ipcRenderer.invoke('exec-command', command),
 
-  // Git — Phase C extended with checkpoint, squash, stash operations
+  // Git — extended with checkpoint, squash, stash operations
   git: {
     commit: (message: string) => ipcRenderer.invoke('git-commit', message),
     getHeadHash: () => ipcRenderer.invoke('git-get-head-hash'),
     createCheckpoint: (label: string) => ipcRenderer.invoke('git-create-checkpoint', label),
     restoreToCheckpoint: (checkpointHash: string) => ipcRenderer.invoke('git-restore-to-checkpoint', checkpointHash),
-    squashCommits: (commitMessage: string, count?: number) => ipcRenderer.invoke('git-squash-commits', commitMessage, count ?? 5),
+    squashCommits: (commitMessage: string, count = 5) => ipcRenderer.invoke('git-squash-commits', commitMessage, count),
     stash: () => ipcRenderer.invoke('git-stash'),
     stashPop: () => ipcRenderer.invoke('git-stash-pop'),
     hasUncommitted: () => ipcRenderer.invoke('git-has-uncommitted'),
@@ -101,30 +101,35 @@ contextBridge.exposeInMainWorld('api', {
     setConfig: (key: string, value: unknown) => ipcRenderer.invoke('electron-store-set-config', key, value),
   },
 
-   // Phase C — Approval events (main → renderer notifications)
-   approval: {
-     onApprovalRequest: (callback: Callback) => {
-       const handler = (_e: unknown, data: unknown) => callback(data);
-       ipcRenderer.on('approval-request', handler);
-       return () => ipcRenderer.removeListener('approval-request', handler);
-     },
-   },
+  // Approval events (main → renderer notifications)
+  approval: {
+    onApprovalRequest: (callback: Callback) => {
+      const handler = (_e: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('approval-request', handler);
+      return () => ipcRenderer.removeListener('approval-request', handler);
+    },
+  },
 
-   // Phase E — Engine logging (real-time monitoring of both engines during reasoning blocks)
-   engineLogging: {
-     start: (engineId: 'primary' | 'systemAI') => ipcRenderer.invoke('engine-logging-start', engineId),
-     stop: (engineId: 'primary' | 'systemAI') => ipcRenderer.invoke('engine-logging-stop', engineId),
-     getConfig: () => ipcRenderer.invoke('engine-logging-get-config'),
-     setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => ipcRenderer.invoke('engine-logging-set-config', config),
-     onEngineData: (callback: Callback) => {
-       const handler = (_e: unknown, data: unknown) => callback(data);
-       ipcRenderer.on('engine-logging-data', handler);
-       return () => ipcRenderer.removeListener('engine-logging-data', handler);
-     },
-     onLogEntry: (callback: Callback) => {
-       const handler = (_e: unknown, entry: unknown) => callback(entry);
-       ipcRenderer.on('engine-logging-log', handler);
-       return () => ipcRenderer.removeListener('engine-logging-log', handler);
-     },
-   },
- });
+  // Engine logging (real-time monitoring of both engines during reasoning blocks)
+  engineLogging: {
+    start: (engineId: 'primary' | 'systemAI') => ipcRenderer.invoke('engine-logging-start', engineId),
+    stop: (engineId: 'primary' | 'systemAI') => ipcRenderer.invoke('engine-logging-stop', engineId),
+    getLogEntries: (engineId: 'primary' | 'systemAI', includeDisk = false) => ipcRenderer.invoke('engine-logging-get-log-entries', engineId, includeDisk),
+    clearLogEntries: (engineId: 'primary' | 'systemAI') => ipcRenderer.invoke('engine-logging-clear-log-entries', engineId),
+    getConfig: () => ipcRenderer.invoke('engine-logging-get-config'),
+    setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => ipcRenderer.invoke('engine-logging-set-config', config),
+    onEngineData: (callback: Callback) => {
+      const handler = (_e: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('engine-logging-data', handler);
+      return () => ipcRenderer.removeListener('engine-logging-data', handler);
+    },
+    onLogEntry: (callback: Callback) => {
+      const handler = (_e: unknown, entry: unknown) => callback(entry);
+      ipcRenderer.on('engine-logging-log', handler);
+      return () => ipcRenderer.removeListener('engine-logging-log', handler);
+    },
+  },
+
+  // App shutdown cleanup
+  appShutdown: () => ipcRenderer.invoke('app-shutdown'),
+});

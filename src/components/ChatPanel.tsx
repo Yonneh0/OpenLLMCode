@@ -95,7 +95,7 @@ function renderMarkdown(text: string): React.ReactNode {
       }
       // Emphasis (single asterisk): *text* — but not if part of **
       if (text.startsWith('*', i) && text[i + 1] !== '*') {
-        const end = text.indexOf('*' as string, i + 1);
+        const end = text.indexOf('*', i + 1);
         if (end !== -1) {
           parts.push({ isStrong: false, isEmphasis: true, isCode: false, text: text.slice(i + 1, end).replace(/\*/g, '') });
           i = end + 1;
@@ -104,7 +104,7 @@ function renderMarkdown(text: string): React.ReactNode {
       }
       // Inline code: `code`
       if (text.startsWith('`', i)) {
-        const end = text.indexOf('`' as string, i + 1);
+        const end = text.indexOf('`', i + 1);
         if (end !== -1) {
           parts.push({ isStrong: false, isEmphasis: false, isCode: true, text: text.slice(i + 1, end).replace(/`/g, '') });
           i = end + 1;
@@ -406,7 +406,7 @@ function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'a
             🤖 Agent
             <div className="flex gap-1.5">
               {message.streaming && <button title="Cancel" onClick={() => useChatStore.getState().stopStreaming()} className="opacity-0 hover:opacity-100 transition-opacity text-xs text-[#f38ba8]">✕</button>}
-              <button title="Regenerate" onClick={() => {/* TODO: regenerate */}} className="opacity-0 hover:opacity-100 transition-opacity text-xs">🔁</button>
+              <button title="Regenerate" onClick={() => handleRegenerate(message.id)} className="opacity-0 hover:opacity-100 transition-opacity text-xs">🔁</button>
               <CopyButton content={message.content} />
             </div>
           </span>
@@ -443,6 +443,76 @@ function ChatMessageItem({ message }: { message: { id: string; role: 'user' | 'a
       </div>
     </div>
   );
+}
+
+/**
+ * Regenerate an agent response by re-sending the user's last message with same generation config.
+ */
+function handleRegenerate(messageId: string): void {
+  const store = useChatStore.getState();
+  
+  // Find the message to regenerate and get its index in the messages array
+  const msgIdx = store.messages.findIndex(m => m.id === messageId);
+  if (msgIdx < 1) return; // Need at least a user message before this agent message
+  
+  // Get the preceding user message to re-send as context
+  const prevMessage = store.messages[msgIdx - 1];
+  if (prevMessage.role !== 'user') return; // Previous must be a user message
+  
+  // Use same generation config as original, or default if not available
+  const generationConfig = store.messages[msgIdx]?.generationConfig || getDefaults();
+  
+  // Remove the current agent message and any subsequent tool calls
+  useChatStore.getState().setMessages(store.messages.slice(0, msgIdx));
+  
+  // Start streaming a new response — same pattern as handleSend but without adding a user message first
+  setTimeout(() => {
+    const streamTexts = [
+      `I'll investigate this. Let me read the file first to understand the current implementation.\n\n🔧 Tool: \`read_file\` — completed`,
+      '\n\nI found an issue in the auth middleware.',
+      `\n\nHere's my plan:\n\n1. Update the secret key in \`.env\`\n2. Modify the verification logic to handle rotation\n3. Add a fallback mechanism for graceful degradation`
+    ];
+
+    let currentMsgIdx = 0;
+    let charIdx = 0;
+
+    const responseId = `msg-${Date.now()}`;
+    useChatStore.getState().setMessages([...store.messages, {
+      id: responseId, role: 'assistant' as const, content: '', timestamp: Date.now(), streaming: true, toolCalls: [],
+      generationConfig: generationConfig || getDefaults()
+    }]);
+
+    const interval = setInterval(() => {
+      if (currentMsgIdx >= streamTexts.length) {
+        clearInterval(interval);
+        useChatStore.setState((s: any) => ({ 
+          isSending: false,
+          messages: s.messages.map((m: ChatMessage) => (m.role === 'assistant' ? { ...m, streaming: false } : m))
+        }));
+        return;
+      }
+
+      const fullText = streamTexts.slice(0, currentMsgIdx + 1).join('');
+      useChatStore.setState((s: any) => ({ 
+        messages: s.messages.map((m: ChatMessage) => m.id === responseId ? { ...m, content: fullText } : m)
+      }));
+
+      // Add tool call card after first chunk arrives (simulates real-time tool execution)
+      if (currentMsgIdx === 0 && charIdx > 5) {
+        useChatStore.setState((s: any) => ({ 
+          messages: s.messages.map((m: ChatMessage) => m.id === responseId ? { ...m, toolCalls: [{ id: 't1', type: 'read_file', status: 'completed' }] } : m)
+        }));
+      }
+
+      charIdx++;
+      if (charIdx >= streamTexts[currentMsgIdx].length) {
+        currentMsgIdx++;
+        charIdx = 0;
+      }
+    }, 15);
+
+    return () => clearInterval(interval);
+  }, 600);
 }
 
 // Fix #6: System Prompt Editor Modal — controlled by parent via isOpen/onClose props

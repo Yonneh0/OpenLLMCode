@@ -1,15 +1,17 @@
-import React, { useState, useCallback } from 'react';
+// OpenLLMCode — Local AI-powered coding assistant (Electron + React + TypeScript)
+import React, { useState } from 'react';
 import ApprovalGate from './components/ApprovalGate';
 import CheckpointPanel from './components/CheckpointPanel';
 import TaskPanel from './components/TaskPanel';
+import McpPanel from './components/McpPanel';
 import { MonacoEditor } from './components/MonacoEditor';
 import { XTermTerminal } from './components/XTermTerminal';
 import { ProjectWizard } from './components/ProjectWizard';
 import { ChatPanel } from './components/ChatPanel';
-import type { AgentMode } from './types';
+import type { AgentMode, GenerationConfig } from './types';
 import { TitleBar } from './components/TitleBar';
 import { useFileTreeStore, FileItem } from './store/fileTreeStore';
-import { useTaskStore } from './store/taskStore';
+import { GenerationParams } from './components/GenerationParams';
 
 // Mode labels — single source of truth for mode toggle display
 const MODE_LABELS: Record<AgentMode, string> = {
@@ -30,7 +32,7 @@ function FileTree() {
     return <div className="text-xs text-[#6c7086]">Loading...</div>;
   }
 
-  function renderTree(items: FileItem[], depth: number = 0) {
+  function renderTree(items: FileItem[], depth = 0) {
     return items.map((item) => (
       <li key={item.path} className="select-none">
         <div
@@ -68,20 +70,19 @@ function fileIcon(name: string): string {
   return icons[ext] ?? '📄';
 }
 
+// Default generation config — used as the source of truth for all panels
+const DEFAULT_CONFIG: GenerationConfig = {
+  temperature: 0.7,
+  topP: 0.9,
+  repetitionPenalty: 1.1,
+  maxTokens: 4096,
+  stopSequences: ['<|end_of_turn|>'],
+};
+
 export function App() {
   const [mode, setMode] = useState<AgentMode>('plan');
   const [showWizard, setShowWizard] = useState(false);
-  const { currentTask } = useTaskStore();
-
-  // Checkpoint handlers via IPC
-  const handleRestoreCheckpoint = useCallback(async (checkpointHash: string) => {
-    if (!checkpointHash) return;
-    try { await window.api.git.restoreToCheckpoint(checkpointHash); } catch {}
-  }, []);
-
-  const handleDeleteContextAfterCheckpoint = useCallback((checkpointId: string) => {
-    useTaskStore.getState().deleteContextAfterCheckpoint(checkpointId);
-  }, []);
+  const [generationConfig, setGenerationConfig] = useState<GenerationConfig>(DEFAULT_CONFIG);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#1e1e2e] text-white font-sans">
@@ -110,11 +111,8 @@ export function App() {
           {/* Task Panel */}
           <TaskPanel />
 
-          {/* MCP Servers */}
-          <div className="px-3 py-2 border-t border-[#45475a] space-y-1.5">
-            <h2 className="text-xs font-semibold text-[#a6adc8] uppercase tracking-wider mb-1 mt-1">MCP</h2>
-            <div className="flex items-center gap-1.5 text-sm opacity-70 hover:opacity-100 cursor-pointer transition-opacity">✅ Git Server</div>
-          </div>
+          {/* MCP Servers — live from store state */}
+          <McpPanel />
         </aside>
 
         {/* Editor area — MonacoEditor includes its own tab bar and status bar */}
@@ -122,16 +120,16 @@ export function App() {
           <MonacoEditor />
         </main>
 
-        {/* Chat panel — uses Phase B ChatPanel with streaming, Markdown, etc. */}
+        {/* Chat panel — streaming, Markdown rendering, tool call cards */}
         <aside className="w-[420px] border-l border-[#45475a] flex-shrink-0 flex flex-col">
-          {/* Checkpoint Panel */}
-          <CheckpointPanel
-            onRestore={handleRestoreCheckpoint}
-            onDeleteContextAfter={handleDeleteContextAfterCheckpoint}
-          />
+          {/* Generation Params Panel — controlled by parent state */}
+          <GenerationParams config={generationConfig} onChange={setGenerationConfig} />
 
-          {/* Chat messages */}
-          <ChatPanel />
+          {/* Checkpoint Panel — self-contained, handles IPC internally */}
+          <CheckpointPanel />
+
+          {/* Chat messages — generationConfig wired from parent state */}
+          <ChatPanel generationConfig={generationConfig} />
         </aside>
       </main>
 

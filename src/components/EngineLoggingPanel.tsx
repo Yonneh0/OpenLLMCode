@@ -46,13 +46,10 @@ export const EngineLoggingPanel: React.FC<EngineLoggingPanelProps> = ({
     searchQuery: '',
   });
 
-  // Log entries per engine
-  interface EntryState {
-    primaryEntries: Array<{ id: string; timestamp: number; level: LogLevel; message: string }>;
-    systemAIEntries: Array<{ id: string; timestamp: number; level: LogLevel; message: string }>;
-  }
+  // Log entries per engine — use a generic type for dynamic key access
+  interface EngineLogEntry { id: string; timestamp: number; level: LogLevel; message: string }
 
-  const [entries, setEntries] = useState<EntryState>({
+  const [entries, setEntries] = useState<{ primaryEntries: EngineLogEntry[]; systemAIEntries: EngineLogEntry[] }>({
     primaryEntries: [],
     systemAIEntries: [],
   });
@@ -91,17 +88,23 @@ export const EngineLoggingPanel: React.FC<EngineLoggingPanelProps> = ({
 
         // Only process engine-logging-log events (not raw stdout forwarding)
         if (event.type === 'engine-logging-log' && typeof event.level === 'string' && typeof event.message === 'string') {
-          const entry: EntryState[keyof EntryState][number] = {
+          const entry: EngineLogEntry = {
             id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             timestamp: Date.now(),
             level: (event.level as LogLevel),
             message: event.message.toString(),
           };
 
-          setEntries((prev) => ({
-            ...prev,
-            [`${event.engineId}Entries`]: [...prev[`${event.engineId}Entries`], entry].slice(-10000), // Cap at 10K entries per engine
-          }));
+          // Type-safe dynamic key access — engineId must be 'primary' or 'systemAI' to match the EntryState keys
+          type LogEntriesKey = keyof Omit<typeof entries, 'systemAIEntries'>;
+          const logKey = `${event.engineId}Entries` as LogEntriesKey;
+          
+          setEntries((prev) => {
+            // Use explicit typing for safe dynamic key access within the state shape
+            const prevRecord = prev as Record<string, unknown>;
+            const currentArr = (prevRecord[logKey] ?? []) as EngineLogEntry[];
+            return { ...prev, [logKey]: [...currentArr, entry].slice(-10000) } as typeof entries; // Cap at 10K entries per engine
+          });
         }
       } catch { /* ignore parsing errors */ }
     });
@@ -126,7 +129,11 @@ export const EngineLoggingPanel: React.FC<EngineLoggingPanelProps> = ({
   };
 
   const handleClearEntries = (engineId: 'primary' | 'systemAI') => () => {
-    setEntries((prev) => ({ ...prev, [`${engineId}Entries`]: [] }));
+    if (engineId === 'primary') {
+      setEntries(prev => ({ ...prev, primaryEntries: [] }));
+    } else {
+      setEntries(prev => ({ ...prev, systemAIEntries: [] }));
+    }
   };
 
   // Filter entries based on current filter level and search query
@@ -154,7 +161,7 @@ export const EngineLoggingPanel: React.FC<EngineLoggingPanelProps> = ({
     return filtered.sort((a, b) => b.timestamp - a.timestamp);
   };
 
-  const currentEntries = getFilteredEntries(entries[`${tab.activeTab}Entries`]);
+  const currentEntries = tab.activeTab === 'primary' ? getFilteredEntries(entries.primaryEntries) : getFilteredEntries(entries.systemAIEntries);
 
   // ─── Render ──────────────
 

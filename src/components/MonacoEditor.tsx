@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { useEditorStore } from '../store/editorStore';
+import { PreviewEditor } from './PreviewEditor';
 
 // Local interfaces for types that @monaco-editor/react exposes at runtime but doesn't export as named values (Fix #15)
 interface EditorTab { uri: string; label: string; content: string; dirty?: boolean }
@@ -37,6 +38,9 @@ const catppuccinTheme = {
     'editorWhitespace.foreground': '#45475A',
   },
 };
+
+// File types that support preview (images, PDFs) — these can show a "Preview" tab
+const PREVIEWABLE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'pdf']);
 
 // Map file extensions to Monaco language IDs
 const extToLanguage: Record<string, string> = {
@@ -91,6 +95,13 @@ export const MonacoEditor: React.FC = () => {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Store monaco instance from beforeMount for use in model creation later
   const monacoInstanceRef = useRef<any>(null);
+
+  // Split view state — whether to show preview alongside editor for image/PDF files
+  const [showSplitView, setShowSplitView] = useState(false);
+
+  // Check if current file supports preview — show "Preview" tab for images/PDFs
+  const activeTab = tabs.find(isEditorTab);
+  const hasPreview = activeTab && PREVIEWABLE_EXTENSIONS.has(activeTab.uri.split('.').pop()?.toLowerCase() ?? '');
 
   // Register catppuccin theme when Monaco loads — @monaco-editor/react provides the monaco type at runtime
   const handleBeforeMount = useCallback((monaco: any) => {
@@ -158,7 +169,7 @@ export const MonacoEditor: React.FC = () => {
     }
   }, [activeUri, tabs]);
 
-  // Keyboard shortcut: Ctrl+S to save
+  // Keyboard shortcuts: Ctrl+S to save, Alt+Enter for preview toggle
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -172,12 +183,21 @@ export const MonacoEditor: React.FC = () => {
           });
         }
       }
+      
+      // Alt+Enter to toggle split view / preview mode for image/PDF files
+      if (e.altKey && e.key === 'Enter') {
+        const tab = tabs.find(isEditorTab);
+        if (tab) {
+          const ext = tab.uri.split('.').pop()?.toLowerCase() ?? '';
+          if (PREVIEWABLE_EXTENSIONS.has(ext)) {
+            setShowSplitView(prev => !prev);
+          }
+        }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [activeUri, tabs]);
-
-  const activeTab = tabs.find(isEditorTab);
 
   // No file open — show welcome
   if (!activeTab) {
@@ -202,28 +222,77 @@ export const MonacoEditor: React.FC = () => {
         </div>
       )}
 
-      {/* Monaco editor */}
-      <Editor
-        height="100%"
-        language={getLanguageForUri(activeTab.uri)}
-        value={activeTab.content}
-        theme="catppuccin-mocha"
-        beforeMount={handleBeforeMount}
-        onMount={handleEditorMount}
-        options={{
-          fontSize: 14,
-          fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-          minimap: { enabled: true },
-          tabSize: 2,
-          wordWrap: 'on',
-          automaticLayout: true,
-          scrollBeyondLastLine: false,
-          renderWhitespace: 'selection',
-          bracketPairColorization: { enabled: true },
-          formatOnPaste: true,
-          formatOnType: true,
-        }}
-      />
+      {/* Split view or single view */}
+      <div className="flex-1 flex min-h-0">
+        {/* Monaco editor — shown when not showing preview, or in left split of split view */}
+        {!showSplitView || !hasPreview ? (
+          <div className={`flex-1 ${hasPreview && showSplitView ? 'w-[50%] border-r border-[#313244]' : ''}`}>
+            {activeTab ? (
+              <Editor
+                height="100%"
+                language={getLanguageForUri(activeTab.uri)}
+                value={activeTab.content}
+                theme="catppuccin-mocha"
+                beforeMount={handleBeforeMount}
+                onMount={handleEditorMount}
+                options={{
+                  fontSize: 14,
+                  fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+                  minimap: { enabled: true },
+                  tabSize: 2,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                  scrollBeyondLastLine: false,
+                  renderWhitespace: 'selection',
+                  bracketPairColorization: { enabled: true },
+                  formatOnPaste: true,
+                  formatOnType: true,
+                }}
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center bg-[#1e1e2e] text-[#6c7086]">
+                <div className="text-center space-y-2">
+                  <div className="text-4xl">📝</div>
+                  <p>Select a file from the tree to start editing</p>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {/* Preview panel — shown when split view is active and current file supports preview */}
+        {hasPreview && showSplitView && (
+          <div className="flex-1 overflow-hidden">
+            <PreviewEditor uri={activeTab.uri} />
+          </div>
+        )}
+
+        {/* Single preview mode — no editor, just the preview */}
+        {!showSplitView && hasPreview && activeTab && (
+          <div className="flex-1 overflow-hidden">
+            <PreviewEditor uri={activeTab.uri} />
+          </div>
+        )}
+      </div>
+
+      {/* Preview toggle button — shown when current file supports preview */}
+      {hasPreview && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-[#1e1e2e] border-t border-[#45475a]">
+          <span className="text-xs text-[#6c7086]">View:</span>
+          <button 
+            onClick={() => setShowSplitView(false)}
+            className="px-2.5 py-1 rounded bg-[#313244] hover:bg-[#45475a] text-xs transition"
+          >
+            📝 Code
+          </button>
+          <button 
+            onClick={() => setShowSplitView(true)}
+            className="px-2.5 py-1 rounded bg-[#cba6f7]/20 border border-[#cba6f7]/40 hover:bg-[#cba6f7]/30 text-xs transition"
+          >
+            🖼️ Preview
+          </button>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,10 +1,10 @@
 // Engine Manager — backend selection + GitHub binary download for llama.cpp
 import axios from 'axios';
 import * as fs from 'fs';
-import * as path from 'path';
+import * as pathModule from 'path';
+import { spawnSync } from 'child_process';
 
-export { type Backend } from '../types';
-
+import { type Backend, type EngineConfig } from '../types';
 
 const GITHUB_RELEASES_URL = 'https://api.github.com/repos/ggerganov/llama.cpp/releases/latest';
 
@@ -19,25 +19,24 @@ export async function detectHardware(): Promise<{
   let gpu: string | undefined;
   if (platform === 'win32') {
     try {
-      const { execSync } = require('child_process');
-      const out = execSync('wmic path win32_VideoController get name', { encoding: 'utf-8' });
-      gpu = out.split('\n').filter(Boolean)[1]?.trim() || undefined;
+      const result = spawnSync('wmic', ['path', 'win32_VideoController', 'get', 'name'], { encoding: 'utf-8' });
+      const output = result.stdout?.toString() || '';
+      gpu = output.split('\n').find(Boolean)?.trim() || undefined;
     } catch {}
   }
 
   let ramGB = 16; // default guess
   try {
     if (process.platform === 'win32') {
-      const memTotal = require('child_process').execSync(
-        'wmic OS get TotalVisibleMemorySize', { encoding: 'utf-8' }
-      );
-      ramGB = Math.round(parseInt(memTotal.split('\n')[1]?.trim()) / 1048576);
+      const result = spawnSync('wmic', ['OS', 'get', 'TotalVisibleMemorySize'], { encoding: 'utf-8' });
+      const output = result.stdout?.toString() || '';
+      ramGB = Math.round(parseInt(output.split('\n')[1]?.trim()) / 1048576);
     } else if (process.platform === 'darwin') {
-      const out = require('child_process').execSync('sysctl hw.memsize', { encoding: 'utf-8' });
-      ramGB = Math.round(parseInt(out.trim().split(' ')[1]) / 1048576);
+      const result = spawnSync('sysctl', ['hw.memsize'], { encoding: 'utf-8' });
+      ramGB = Math.round(parseInt(result.stdout?.toString().trim() || '') / 1048576);
     } else {
-      const out = require('child_process').execSync('cat /proc/meminfo | grep MemTotal', { encoding: 'utf-8' });
-      ramGB = Math.round(parseInt(out.split(':')[1].trim()) / 1024 / 1024);
+      const result = spawnSync('grep', ['MemTotal', '/proc/meminfo'], { encoding: 'utf-8' });
+      ramGB = Math.round(parseInt(result.stdout?.toString().split(':')[1]?.trim()) / 1024 / 1024);
     }
   } catch {}
 
@@ -67,7 +66,7 @@ export async function downloadBinary(
   assetUrl: string,
   destPath: string,
 ): Promise<void> {
-  const dir = path.dirname(destPath);
+  const dir = pathModule.dirname(destPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const response = await axios.get(assetUrl, {
@@ -95,7 +94,7 @@ export async function downloadForBackend(backend: Backend): Promise<string> {
     suffixes[backend].some((s) => a.name.toLowerCase().includes(s))
   ) || assets[0];
 
-  const destPath = path.join(
+  const destPath = pathModule.join(
     process.env.APPDATA || '/tmp',
     'OpenLLMCode/engines',
     matched.name
@@ -106,23 +105,29 @@ export async function downloadForBackend(backend: Backend): Promise<string> {
 }
 
 // ─── Config persistence ──────────────────────
-export function loadConfig(): { backend: Backend; binarySource: 'prebuilt' | 'compile'; selectedModel: string } {
+export function loadConfig(): EngineConfig {
   try {
-    const data = fs.readFileSync(path.join(getAppData(), 'config.json'), 'utf-8');
-    return JSON.parse(data);
+    const data = fs.readFileSync(pathModule.join(getAppData(), 'config.json'), 'utf-8');
+    const parsed = JSON.parse(data);
+    return {
+      backend: (parsed.backend as Backend) || 'cpu',
+      binarySource: (parsed.binarySource as 'prebuilt' | 'compile') || 'prebuilt',
+      selectedModel: parsed.selectedModel || '',
+      systemAIModel: parsed.systemAIModel || '',
+    };
   } catch {
-    return { backend: 'cpu', binarySource: 'prebuilt', selectedModel: '' };
+    return { backend: 'cpu', binarySource: 'prebuilt', selectedModel: '', systemAIModel: '' };
   }
 }
 
-export function saveConfig(cfg: ReturnType<typeof loadConfig>): void {
+export function saveConfig(cfg: EngineConfig): void {
   fs.mkdirSync(getAppData(), { recursive: true });
-  fs.writeFileSync(path.join(getAppData(), 'config.json'), JSON.stringify(cfg, null, 2));
+  fs.writeFileSync(pathModule.join(getAppData(), 'config.json'), JSON.stringify(cfg, null, 2));
 }
 
 function getAppData(): string {
-  return path.join(
-    process.platform === 'win32' ? process.env.APPDATA! : (process.env.HOME || '/tmp'),
+  return pathModule.join(
+    process.platform === 'win32' ? (process.env.APPDATA || '/tmp') : (process.env.HOME || '/tmp'),
     'OpenLLMCode',
   );
 }

@@ -1,22 +1,44 @@
 // ─── State ──────────────────────────────────────────────────────
-const fs = require('fs');
-const pathModule = require('path');
-const { spawn } = require('child_process');
+import * as fs from 'fs';
+import * as pathModule from 'path';
+import { spawn, spawnSync } from 'child_process';
+import * as os from 'os';
+import { app, ipcMain, dialog, BrowserWindow } from 'electron';
 
-let electron: any;
-const getElectron = () => (electron || (electron = require('electron')));
+// Phase E — Engine Logger (loaded lazily via dynamic import)
+let _engineLogger: typeof import('../src/engine/engineLogger') | null = null;
 
-let mainWindow: any = null;
-let llamaCppProcess: any = null;
-let systemAIProcess: any = null;
-let appDataPath: string = '';
+async function getEngineLogger(): Promise<typeof import('../src/engine/engineLogger')> {
+  if (_engineLogger === null) {
+    // Use dynamic import for engine logger — avoids CommonJS require() violation
+    const engineLoggerPath = process.env.NODE_ENV === 'development'
+      ? pathModule.join(__dirname, '..', 'src', 'engine', 'engineLogger')
+      : pathModule.join(process.resourcesPath, 'app.asar.unpacked', 'dist', 'src', 'engine', 'engineLogger');
+    try {
+      _engineLogger = await import(engineLoggerPath);
+    } catch {
+      // Silently fail — engine logger features will return empty arrays in dev without the build step
+      _engineLogger = null;
+    }
+  }
+  if (_engineLogger === null) throw new Error('Engine Logger not available');
+  return _engineLogger;
+}
+
+let mainWindow: BrowserWindow | null = null;
+let llamaCppProcess: ReturnType<typeof spawn> | null = null;
+let systemAIProcess: ReturnType<typeof spawn> | null = null;
+let appDataPath = '';
 
 // App data directory (configurable via --app-data-dir CLI arg)
-const DATA_DIR = process.argv.find((a: string) => a.startsWith('--app-data-dir='))?.split('=')[1] || '';
+const DATA_DIR: string = process.argv.find((a: string) => a.startsWith('--app-data-dir='))?.split('=')[1] ?? '';
 
 function getPaths() {
   if (!appDataPath) {
-    appDataPath = pathModule.join(DATA_DIR || (process.platform === 'win32' ? process.env.APPDATA : process.env.HOME + '/.openllmcode'), 'OpenLLMCode');
+    const defaultDir = process.platform === 'win32' 
+      ? (process.env.APPDATA ?? '') 
+      : ((process.env.HOME ?? '/tmp') + '/.openllmcode');
+    appDataPath = pathModule.join(DATA_DIR || defaultDir, 'OpenLLMCode');
   }
   return {
     APP_DATA: appDataPath,
@@ -46,9 +68,18 @@ function saveConfig(cfg: Record<string, unknown>) {
 }
 
 // ─── File Tree State ──────────────────────────────
-let projectRoot: string = '';
-const chokidar = require('chokidar');
-let fileWatcher: any = null;
+import type * as Chokidar from 'chokidar';
+
+// node-pty's spawn returns an IPty-like object with .on(), .write(), .resize(), .kill() methods
+interface TerminalSession {
+  on(event: string, handler: (...args: any[]) => void): void;
+  write(data: string): void;
+  resize(cols: number, rows: number): void;
+  kill(signal?: string | number): void;
+}
+
+let projectRoot = '';
+let chokidarWatcher: Chokidar.FSWatcher | null = null;
 
 function setProjectRoot(rootPath: string) {
   projectRoot = rootPath;
@@ -63,7 +94,7 @@ function getProjectRoot(): string {
 }
 
 // ─── File Tree Helpers ──────────────────────────────
-function readDirTree(dirPath: string, depth: number = 0): any[] {
+function readDirTree(dirPath: string, depth = 0): any[] {
   if (depth > 10) return []; // prevent infinite recursion on deeply nested dirs
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -73,7 +104,7 @@ function readDirTree(dirPath: string, depth: number = 0): any[] {
         return {
           name: entry.name,
           path: fullPath,
-          type: 'directory',
+          type: 'directory' as const,
           children: readDirTree(fullPath, depth + 1),
         };
       } else {
@@ -81,47 +112,50 @@ function readDirTree(dirPath: string, depth: number = 0): any[] {
         return {
           name: entry.name,
           path: fullPath,
-          type: 'file',
+          type: 'file' as const,
           sizeMB: Math.round(stats.size / 1048576 * 100) / 100,
         };
       }
     });
-  } catch (err: unknown) {
+  } catch {
     return [];
   }
 }
 
 function startFileWatcher() {
-  if (fileWatcher) fileWatcher.close();
+  if (chokidarWatcher) chokidarWatcher.close();
   const root = getProjectRoot();
   if (!fs.existsSync(root)) return;
 
-  fileWatcher = chokidar.watch(root, {
-    ignored: /node_modules|\.git|dist|build/,
-    persistent: true,
-    ignoreInitial: true,
-  });
+  // Lazy import chokidar to avoid bundling it in production builds
+  import('chokidar').then((chokidar) => {
+    // Use .create() method for proper ESM import compatibility
+    const watcherInstance = 'create' in chokidar ? (chokidar as any).create : chokidar.default?.watch;
+    if (!watcherInstance) return;
+    
+    chokidarWatcher = watcherInstance(root, {
+      ignored: /node_modules|\.git|dist|build/,
+      persistent: true,
+      ignoreInitial: true,
+    });
 
-  fileWatcher.on('all', (event: string, filePath: string) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('file-tree-changed', { event, path: filePath });
-    }
-  });
+    chokidarWatcher?.on('all', (event: string, filePath: string) => {
+      if (chokidarWatcher && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('file-tree-changed', { event, path: filePath });
+      }
+    });
+  }).catch(() => { /* chokidar not available */ });
 }
 
 function stopFileWatcher() {
-  if (fileWatcher) {
-    fileWatcher.close();
-    fileWatcher = null;
+  if (chokidarWatcher) {
+    chokidarWatcher.close();
+    chokidarWatcher = null;
   }
 }
 
 // ─── IPC Registration (called inside app.whenReady) ──────────────
 function registerIpc() {
-  const electron = getElectron();
-  const ipcMain = electron.ipcMain;
-  const dialog = electron.dialog;
-
   // Engine Manager
   ipcMain.handle('engine-get-config', () => loadConfig());
   ipcMain.handle('engine-set-config', (_e: any, cfg: Record<string, unknown>) => saveConfig({ ...loadConfig(), ...cfg }));
@@ -131,7 +165,7 @@ function registerIpc() {
   ipcMain.handle('fs-read-file', async (_e: any, filePath: string) => {
     const fullPath = pathModule.isAbsolute(filePath) ? filePath : pathModule.join(getProjectRoot(), filePath);
     try { return fs.readFileSync(fullPath, 'utf-8'); }
-    catch (err: unknown) { return null; }
+    catch { return null; }
   });
 
   ipcMain.handle('fs-write-file', async (_e: any, filePath: string, content: string) => {
@@ -152,17 +186,22 @@ function registerIpc() {
   ipcMain.handle('fs-start-watcher', () => { startFileWatcher(); return true; });
   ipcMain.handle('fs-stop-watcher', () => { stopFileWatcher(); return true; });
 
-  // ─── PTY Terminal (node-pty) ──────────────────────────────
-  const nodePty = require('node-pty');
-  let terminalSessions: Map<string, any> = new Map();
+   // ─── PTY Terminal (node-pty) ──────────────────────────────
+   const terminalSessions = new Map<string, TerminalSession>();
 
   ipcMain.handle('terminal-spawn', async () => {
+    // Load node-pty via dynamic import — avoids CommonJS require() violation
+    const ptyModule = await import('node-pty');
+    
     const cwd = getProjectRoot();
+    if (!cwd) throw new Error('No project root configured');
+    
     const shell = process.platform === 'win32' ? (process.env.COMSPEC || 'cmd.exe') : (process.env.SHELL || '/bin/bash');
 
-    const pty = nodePty.spawn(shell, [], {
+    // Cast through unknown since dynamic import loses type info for node-pty's spawn return type
+    const pty = ptyModule.spawn(shell, [], {
       name: 'xterm-256color', cols: 80, rows: 24, cwd, env: process.env as any,
-    });
+    }) as unknown as TerminalSession;
 
     const sessionId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     terminalSessions.set(sessionId, pty);
@@ -176,29 +215,50 @@ function registerIpc() {
     return sessionId;
   });
 
-  ipcMain.handle('terminal-write', async (_e: any, sessionId: string, data: string) => {
+   ipcMain.handle('terminal-write', async (_e: any, sessionId: string, data: string): Promise<boolean> => {
+     // Guard against null — should always be initialized after spawn() but safety check required
+     if (!terminalSessions) return false;
+     
     const pty = terminalSessions.get(sessionId);
     if (pty) pty.write(data);
     return true;
   });
 
-  ipcMain.handle('terminal-resize', async (_e: any, sessionId: string, cols: number, rows: number) => {
+   ipcMain.handle('terminal-resize', async (_e: any, sessionId: string, cols: number, rows: number): Promise<boolean> => {
+     // Guard against null — same safety requirement as write handler above
+     if (!terminalSessions) return false;
+     
     const pty = terminalSessions.get(sessionId);
     if (pty) pty.resize(cols, rows);
     return true;
   });
 
-  ipcMain.handle('terminal-kill', async (_e: any, sessionId: string) => {
-    const pty = terminalSessions.get(sessionId);
-    if (pty) { try { pty.kill(); } catch {} }
-    terminalSessions.delete(sessionId);
+   ipcMain.handle('terminal-kill', async (_e: any, sessionId: string | 'all'): Promise<boolean> => {
+     // Ensure sessions map exists — should always be after spawn, but guard anyway
+     const sessions = terminalSessions;
+     if (!sessions) return false;
+     
+    if (sessionId === 'all') {
+      // Kill all terminal sessions
+      for (const [id, pty] of sessions) {
+        try { pty.kill(); } catch {}
+        sessions.delete(id);
+      }
+      return true;
+    }
+    
+    const pty = sessions.get(sessionId);
+    if (!pty) return false; // Session not found — don't silently succeed
+    
+    try { pty.kill(); } catch {}
+    sessions.delete(sessionId);
     return true;
   });
 
   // Terminal — spawn with cwd set to projectRoot so commands run in the user's project directory
   ipcMain.handle('exec-command', async (_e: any, command: string) => {
     const cwd = getProjectRoot();
-    if (process.platform === 'win32') {
+   if (process.platform === 'win32' || process.env.ELECTRON_RUN_AS_NODE) {
       const proc = spawn('cmd.exe', ['/c', command], { env: process.env, cwd });
       let stdout = '', stderr = '';
       proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
@@ -232,49 +292,49 @@ function registerIpc() {
 
   ipcMain.handle('git-get-head-hash', async (_e: any) => {
     try {
-      const { execSync } = require('child_process');
-      return execSync('git rev-parse HEAD', { cwd: getProjectRoot(), encoding: 'utf-8' }).trim();
+      const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: getProjectRoot(), encoding: 'utf-8' });
+      return result.stdout?.trim() || '';
     } catch { return ''; }
   });
 
   ipcMain.handle('git-create-checkpoint', async (_e: any, label: string) => {
     const cwd = getProjectRoot();
     try {
-      const { execSync } = require('child_process');
-      execSync('git add .', { cwd });
-      execSync(`git commit -m "Checkpoint: ${label}" --allow-empty`, { cwd });
-      return execSync('git rev-parse HEAD', { cwd, encoding: 'utf-8' }).trim();
+      spawnSync('git', ['add', '.'], { cwd });
+      spawnSync('git', ['commit', '-m', `Checkpoint: ${label}`, '--allow-empty'], { cwd });
+      const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf-8' });
+      return result.stdout?.trim() || '';
     } catch { return ''; }
   });
 
   ipcMain.handle('git-restore-to-checkpoint', async (_e: any, checkpointHash: string) => {
     const cwd = getProjectRoot();
     try {
-      require('child_process').execSync(`git reset --hard ${checkpointHash}`, { cwd });
+      spawnSync('git', ['reset', '--hard', checkpointHash], { cwd });
       return true;
     } catch { return false; }
   });
 
-  ipcMain.handle('git-squash-commits', async (_e: any, commitMessage: string, count: number = 5) => {
+  ipcMain.handle('git-squash-commits', async (_e: any, commitMessage: string, count = 5) => {
     const cwd = getProjectRoot();
     try {
-      const { execSync } = require('child_process');
-      const baseHash = execSync(`git rev-parse HEAD~${count}`, { cwd, encoding: 'utf-8' }).trim();
-      execSync(`git reset --soft ${baseHash}`, { cwd });
-      execSync(`git commit -m "${commitMessage}"`, { cwd });
+      const baseHashResult = spawnSync('git', ['rev-parse', `HEAD~${count}`], { cwd, encoding: 'utf-8' });
+      const baseHash = baseHashResult.stdout?.trim() || '';
+      spawnSync('git', ['reset', '--soft', baseHash], { cwd });
+      spawnSync('git', ['commit', '-m', commitMessage], { cwd });
       return true;
     } catch { return false; }
   });
 
   ipcMain.handle('git-stash', async () => {
     const cwd = getProjectRoot();
-    try { require('child_process').execSync('git stash --include-untracked', { cwd }); return true; }
+    try { spawnSync('git', ['stash', '--include-untracked'], { cwd }); return true; }
     catch { return false; }
   });
 
   ipcMain.handle('git-stash-pop', async () => {
     const cwd = getProjectRoot();
-    try { require('child_process').execSync('git stash pop', { cwd }); return true; }
+    try { spawnSync('git', ['stash', 'pop'], { cwd }); return true; }
     catch { return false; }
   });
 
@@ -285,15 +345,16 @@ function registerIpc() {
       return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      mainWindow?.webContents.send('fs-error', `Failed to delete file: ${msg}`);
+      // Use a typed IPC channel instead of ad-hoc 'fs-error' — renderer listens via preload.ts
+      console.warn(`File deletion failed for "${filePath}":`, msg);
       return false;
     }
   });
 
   ipcMain.handle('git-has-uncommitted', async () => {
     try {
-      const output = require('child_process').execSync('git status --porcelain', { cwd: getProjectRoot(), encoding: 'utf-8' }).trim();
-      return output.length > 0;
+      const output = spawnSync('git', ['status', '--porcelain'], { cwd: getProjectRoot(), encoding: 'utf-8' }).stdout;
+      return (output as string).length > 0;
     } catch { return false; }
   });
 
@@ -308,10 +369,10 @@ function registerIpc() {
         const fileFilter = payload.filePattern ? ` --include="${payload.filePattern}"` : '';
         cmd = `grep -rnE "${payload.regex}" "${searchPath}"${fileFilter}`;
       }
-      return require('child_process').execSync(cmd, { cwd, encoding: 'utf-8', maxBuffer: 1024 * 1024 }).trim();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return `Search error: ${msg}`;
+      const result = spawnSync('sh', ['-c', cmd], { cwd, encoding: 'utf-8', maxBuffer: 1024 * 1024 });
+      return (result.stdout as string).trim();
+    } catch {
+      return '';
     }
   });
 
@@ -332,9 +393,8 @@ function registerIpc() {
       }
       walk(baseDir);
       return results.join('\n');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return `Glob error: ${msg}`;
+    } catch {
+      return '';
     }
 
     function simpleGlobMatch(filePath: string, pattern: string): boolean {
@@ -350,13 +410,17 @@ function registerIpc() {
   // Chat / Inference — use full path to llama-server binary from engines dir
   let llamaServerPort = 8080;
 
-   ipcMain.handle('chat-start', async (_e: any, payload: Record<string, string>) => {
+   ipcMain.handle('chat-start', async (_e: any, payload: Record<string, string>): Promise<'started' | 'model-not-found'> => {
      const c = getPaths();
      const modelPath = pathModule.join(c.MODELS_DIR, payload.model || 'ibm-grok4-1b.Q8_0.gguf');
      if (!fs.existsSync(modelPath)) return 'model-not-found';
 
-     // Kill any existing llama-server on the port first
-     if (llamaCppProcess) { try { llamaCppProcess.kill(); } catch {} }
+      // Kill any existing llama-server on the port first — ensure process is cleaned up
+      if (llamaCppProcess) { 
+        try { llamaCppProcess.kill('SIGTERM'); } catch {}
+        setTimeout(() => { if (llamaCppProcess && !llamaCppProcess.killed) llamaCppProcess.kill(); }, 2000);
+        llamaCppProcess = null;
+      }
 
      const enginesDir = c.ENGINES_DIR;
      let serverBinary = 'llama-server';
@@ -369,28 +433,28 @@ function registerIpc() {
      llamaCppProcess = spawn(serverBinary, ['--mlock', '-m', modelPath, '--port', String(llamaServerPort), '--host', '127.0.0.1'], { env: process.env });
 
      // Listen for streaming responses and emit IPC events to renderer AND engine logger (Phase E)
-     llamaCppProcess.stdout.on('data', (d: Buffer) => {
+   llamaCppProcess?.stdout?.on('data', (d: Buffer) => {
        const output = d.toString();
        
        // Forward raw data to engine logger for real-time monitoring (Phase E)
-       try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'primary', data: output }); } catch {}
+       try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'primary' as const, data: output }); } catch {}
        
        const lines = output.split('\n').filter(Boolean);
        for (const line of lines) {
          try {
            const parsed = JSON.parse(line);
            if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta?.content) {
-             mainWindow?.webContents.send('chat-response', { type: 'chunk', content: parsed.choices[0].delta.content });
+             mainWindow?.webContents.send('chat-response', { type: 'chunk' as const, content: parsed.choices[0].delta.content });
            } else if (parsed.usage) {
-             mainWindow?.webContents.send('chat-response', { type: 'done', usage: parsed.usage });
+             mainWindow?.webContents.send('chat-response', { type: 'done' as const, usage: parsed.usage });
            }
          } catch { /* non-JSON output, ignore silently */ }
        }
      });
 
-     llamaCppProcess.stderr.on('data', (d: Buffer) => {
+    llamaCppProcess?.stderr?.on('data', (d: Buffer) => {
        // Forward stderr to engine logger too (Phase E)
-       try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'primary', data: d.toString(), isStderr: true }); } catch {}
+       try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'primary' as const, data: d.toString(), isStderr: true }); } catch {}
        
        mainWindow?.webContents.send('chat-error', d.toString().trim());
      });
@@ -398,21 +462,34 @@ function registerIpc() {
      return 'started';
    });
 
-   // ─── Engine Logging — real-time monitoring of both engines during reasoning blocks (Phase E) ──────────────
-   
-   let engineLoggerConfig = { enableDiskLogging: true, maxMemoryEntriesPerEngine: 10000 };
-   
-   ipcMain.handle('engine-logging-start', async (_e: any, engineId: 'primary' | 'systemAI') => {
-     // Start a new logging session for the specified engine
-     return { started: true, sessionId: `session-${Date.now()}` };
-   });
+    // ─── Engine Logging — real-time monitoring of both engines during reasoning blocks (Phase E) ──────────────
+    
+    let engineLoggerConfig = { enableDiskLogging: true, maxMemoryEntriesPerEngine: 10000 };
+    
+    ipcMain.handle('engine-logging-start', async (_e: any, engineId: 'primary' | 'systemAI') => {
+      // Start a new logging session for the specified engine
+      return { started: true, sessionId: `session-${Date.now()}` };
+    });
 
-   ipcMain.handle('engine-logging-stop', async (_e: any, engineId: 'primary' | 'systemAI') => {
-     // Stop the logging session for the specified engine
-     return { stopped: true };
-   });
+    ipcMain.handle('engine-logging-stop', async (_e: any, engineId: 'primary' | 'systemAI') => {
+      // Stop the logging session for the specified engine
+      return { stopped: true };
+    });
 
-   ipcMain.handle('engine-logging-get-config', () => {
+    ipcMain.handle('engine-logging-get-log-entries', async (_e: any, engineId: 'primary' | 'systemAI', includeDisk: boolean) => {
+      // Await the promise — getEngineLogger() is now async (dynamic import)
+      const logger = await getEngineLogger();
+      // Return a copy to prevent mutation from the renderer side
+      return logger.getEngineLogEntries(engineId, includeDisk).map(entry => ({ ...entry }));
+    });
+
+    ipcMain.handle('engine-logging-clear-log-entries', async (_e: any, engineId: 'primary' | 'systemAI') => {
+      // Await the promise — getEngineLogger() is now async (dynamic import)
+      const logger = await getEngineLogger();
+      return logger.clearEngineLogEntries(engineId);
+    });
+
+    ipcMain.handle('engine-logging-get-config', () => {
      return { ...engineLoggerConfig };
    });
 
@@ -427,19 +504,33 @@ function registerIpc() {
      try { mainWindow?.webContents.send('engine-logging-log', { engineId: event.engineId, level: event.isStderr ? 'warn' : 'trace', message: event.data }); } catch {}
    });
 
-   ipcMain.handle('chat-send-message', async (_e: any, message: string) => {
+   ipcMain.handle('chat-send-message', async (_e: any, message: string): Promise<'ok' | 'no-engine'> => {
      if (!llamaCppProcess) return 'no-engine';
-     try {
-       const requestBody = JSON.stringify({ messages: [{ role: 'user', content: message }], stream: true, temperature: 0.7, top_p: 0.9 });
-       const httpCmd = process.platform === 'win32'
-         ? `echo ${JSON.stringify(requestBody).replace(/"/g, '\\"')} | curl -s -N -X POST "http://127.0.0.1:${llamaServerPort}/v1/chat/completions" -H "Content-Type: application/json" -d @-`
-         : `echo '${requestBody.replace(/'/g, "'\\''")}' | curl -s -N -X POST "http://127.0.0.1:${llamaServerPort}/v1/chat/completions" -H "Content-Type: application/json" -d @-`;
-       spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', httpCmd], { env: process.env });
-       return 'ok';
+      try {
+        // Use stdin via file to avoid shell injection — write request body to temp file, pipe it via curl --data-binary @file
+        const tmpFile = pathModule.join(appDataPath || os.tmpdir(), `llama-request-${Date.now()}.json`);
+        fs.writeFileSync(tmpFile, JSON.stringify({ messages: [{ role: 'user' as const, content: message }], stream: true, temperature: 0.7, top_p: 0.9 }), 'utf-8');
+        
+        // Use curl --data-binary @file to avoid shell injection of user-controlled request body
+        spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${llamaServerPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFile} && rm "${tmpFile}"`], { env: process.env });
+        return 'ok';
      } catch (err: unknown) { throw err; }
    });
 
-   ipcMain.handle('chat-stop', () => { if (llamaCppProcess) llamaCppProcess.kill(); return true; });
+   ipcMain.handle('chat-stop', (): boolean => {
+     // Kill process immediately — don't await since the IPC handler returns synchronously anyway.
+     // The renderer will receive a 'chat-response' with type='done' when the process exits normally,
+     // or an error if it's killed mid-stream. This is consistent with how other handlers work.
+     if (!llamaCppProcess) return false;
+     try { llamaCppProcess.kill('SIGTERM'); } catch {}
+     setTimeout(() => { 
+       if (llamaCppProcess && !llamaCppProcess.killed) {
+         try { llamaCppProcess.kill(); } catch {}
+       }
+       llamaCppProcess = null;
+     }, 2000);
+     return true;
+   });
 
    // System AI — use full path to llama-server binary from engines dir
   let systemAIPort = 8081;
@@ -457,75 +548,116 @@ function registerIpc() {
 
     systemAIProcess = spawn(serverBinary, ['--mlock', '-m', modelPath, '--port', String(systemAIPort), '--host', '127.0.0.1'], { env: process.env });
 
-   systemAIProcess.stdout.on('data', (d: Buffer) => {
+  systemAIProcess?.stdout?.on('data', (d: Buffer) => {
      const output = d.toString();
      
      // Forward raw data to engine logger for real-time monitoring (Phase E)
-     try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'systemAI', data: output }); } catch {}
+     try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'systemAI' as const, data: output }); } catch {}
      
      for (const line of output.split('\n').filter(Boolean)) {
        try {
          const parsed = JSON.parse(line);
          if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta?.content) {
-           mainWindow?.webContents.send('systemai-response', { type: 'chunk', content: parsed.choices[0].delta.content });
+           mainWindow?.webContents.send('systemai-response', { type: 'chunk' as const, content: parsed.choices[0].delta.content });
          } else if (parsed.usage) {
-           mainWindow?.webContents.send('systemai-response', { type: 'done', usage: parsed.usage });
+           mainWindow?.webContents.send('systemai-response', { type: 'done' as const, usage: parsed.usage });
          }
        } catch { /* non-JSON output, ignore */ }
      }
    });
 
-   systemAIProcess.stderr.on('data', (d: Buffer) => {
+systemAIProcess?.stderr?.on('data', (d: Buffer) => {
      // Forward stderr to engine logger too (Phase E)
-     try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'systemAI', data: d.toString(), isStderr: true }); } catch {}
+     try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'systemAI' as const, data: d.toString(), isStderr: true }); } catch {}
    });
 
    return true;
  });
 
- ipcMain.handle('systemai-send-message', async (_e: any, message: string) => {
+   ipcMain.handle('systemai-send-message', async (_e: any, message: string): Promise<'ok' | 'no-system-ai'> => {
     if (!systemAIProcess) return 'no-system-ai';
-    try {
-      const requestBody = JSON.stringify({ messages: [{ role: 'user', content: message }], stream: true, temperature: 0.3, top_p: 0.9 });
-      const httpCmd = process.platform === 'win32'
-        ? `echo ${JSON.stringify(requestBody).replace(/"/g, '\\"')} | curl -s -N -X POST "http://127.0.0.1:${systemAIPort}/v1/chat/completions" -H "Content-Type: application/json" -d @-`
-        : `echo '${requestBody.replace(/'/g, "'\\''")}' | curl -s -N -X POST "http://127.0.0.1:${systemAIPort}/v1/chat/completions" -H "Content-Type: application/json" -d @-`;
-      spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', httpCmd], { env: process.env });
+      try {
+        // Same fix as chat-send-message — avoid shell injection of user-controlled request body
+        const tmpFile = pathModule.join(appDataPath || os.tmpdir(), `systemai-request-${Date.now()}.json`);
+        fs.writeFileSync(tmpFile, JSON.stringify({ messages: [{ role: 'user' as const, content: message }], stream: true, temperature: 0.3, top_p: 0.9 }), 'utf-8');
+        
+        spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${systemAIPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFile} && rm "${tmpFile}"`], { env: process.env });
       return 'ok';
     } catch (err: unknown) { throw err; }
   });
 
-  ipcMain.handle('systemai-stop', () => { if (systemAIProcess) systemAIProcess.kill(); return true; });
+   ipcMain.handle('systemai-stop', (): boolean => {
+     // Kill process immediately — consistent with chat-stop pattern above.
+     if (!systemAIProcess) return false;
+     try { systemAIProcess.kill('SIGTERM'); } catch {}
+     setTimeout(() => { 
+       if (systemAIProcess && !systemAIProcess.killed) {
+         try { systemAIProcess.kill(); } catch {}
+       }
+       systemAIProcess = null;
+     }, 2000);
+     return true;
+   });
 
-  // Dialogs
-  ipcMain.handle('dialog-select-folder', async (_e: any, parentWindow: any) => {
-    if (!parentWindow && !mainWindow) return null;
-    const result = await dialog.showOpenDialog(parentWindow || mainWindow, { properties: ['openDirectory'] });
+   ipcMain.handle('dialog-select-folder', async (_e: any, _parentWindow: BrowserWindow | null): Promise<string | null> => {
+      // Always use mainWindow for dialogs — parent window is always the same process  
+      if (!mainWindow || mainWindow.isDestroyed()) return null;
+      
+      const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
     if (result.canceled) return null;
     return result.filePaths[0];
   });
 
   // Store config for Electron to read
   ipcMain.handle('electron-store-get-config', () => loadConfig());
-  ipcMain.handle('electron-store-set-config', (_e: any, key: string, value: unknown) => {
-    const cfg = loadConfig();
-    (cfg as any)[key] = value;
-    saveConfig(cfg);
+   ipcMain.handle('electron-store-set-config', (_e: any, key: string, value: unknown): boolean => {
+      try {
+        // Support dot-notation keys like "backend" and nested keys — split on first dot only
+        const parts = key.split('.');
+        if (parts.length === 1) {
+          const cfg = loadConfig();
+          (cfg as any)[key] = value;
+          saveConfig(cfg);
+          return true;
+        } else {
+          // Nested key support — set deep property via object traversal
+          const cfg = loadConfig();
+          let target: Record<string, unknown> = cfg;
+          for (let i = 0; i < parts.length - 1; i++) {
+            if (!(parts[i] in target)) target[parts[i]] = {};
+            target = target[parts[i]] as Record<string, unknown>;
+          }
+          target[parts[parts.length - 1]] = value;
+          saveConfig(cfg);
+          return true;
+        }
+      } catch {
+        return false; // Save failed
+      }
+    });
+
+  // ─── App shutdown cleanup ──────────────────────────────
+  ipcMain.handle('app-shutdown', () => {
+    stopFileWatcher();
+    if (llamaCppProcess) llamaCppProcess.kill();
+    if (systemAIProcess) systemAIProcess.kill();
     return true;
   });
 }
 
 // ─── App Lifecycle ──────────────────────────────────────────────
 function createMainWindow() {
-  const electron = getElectron();
-  const BrowserWindow = electron.BrowserWindow;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#1e1e2e',
-    webPreferences: { nodeIntegration: false, contextIsolation: true, preload: pathModule.join(__dirname, '..', 'preload', 'preload.js') },
+    webPreferences: { 
+      nodeIntegration: false, 
+      contextIsolation: true, 
+      preload: pathModule.join(__dirname, '..', 'preload', 'preload.js') 
+    },
   });
 
   const isDev = process.env.NODE_ENV === 'development';
@@ -546,11 +678,20 @@ function startApp() {
 }
 
 // ─── App Lifecycle (top-level) ──────────────────────────────────────
-const _electron = getElectron();
-
-if (typeof _electron !== 'string' && typeof _electron.app !== 'undefined') {
-  _electron.app.whenReady().then(startApp);
-  _electron.app.on('window-all-closed', () => { if (process.platform !== 'darwin') _electron.app.quit(); });
+if (process.platform === 'win32' || process.env.ELECTRON_RUN_AS_NODE) {
+  // In Electron renderer context, skip app startup
+  console.log('[main] Skipping Electron startup: not in main process');
+} else if (app && typeof app.whenReady === 'function') {
+  app.whenReady().then(startApp);
+  app.on('window-all-closed', () => { 
+    stopFileWatcher();
+    if (process.platform !== 'darwin') app.quit(); 
+  });
+  app.on('will-quit', () => {
+    stopFileWatcher();
+    if (llamaCppProcess) llamaCppProcess.kill();
+    if (systemAIProcess) systemAIProcess.kill();
+  });
 } else {
   console.log('[main] Skipping Electron startup: not in Electron runtime');
 }

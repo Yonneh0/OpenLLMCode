@@ -90,20 +90,45 @@ async function compressMessages(
   compressedEntries: CompressedEntry[],
   messagesToCompress: Array<{ id: string; content: string }>,
 ): Promise<CompressedEntry> {
-  const systemClient = new SystemAIClient();
-
   // Build the message text for compression (exclude already-compressed entries)
   const existingSummaryIds = compressedEntries.map(e => e.summary);
   const messagesText = messagesToCompress
     .filter(m => !existingSummaryIds.includes(m.content)) // Avoid recompressing already summarized content
-    .map((m, i) => {
-      return `Message ${i + 1}: ${m.content}`;
-    })
+    .map((m, i) => `Message ${i + 1}: ${m.content}`)
     .join('\n\n');
 
   const compressionPrompt = getCompressionPrompt();
   
   try {
+    // Use the global SystemAIClient if available (singleton managed by main process), otherwise create a new one as fallback
+    let systemClient: any;
+    
+    try {
+      const module = await import('./systemAI');
+      // @ts-ignore — systemAIClinet is set globally during app init
+      systemClient = typeof window !== 'undefined' ? (window as any).systemAIClient : null;
+      
+      if (!systemClient || !systemClient.process?.stdin) {
+        console.warn('System AI not available, creating fallback client');
+        systemClient = new SystemAIClient();
+        await systemClient.start();
+      }
+    } catch {
+      // Import failed — create a fallback client as last resort
+      systemClient = new SystemAIClient();
+      try {
+        await systemClient.start();
+      } catch (e) {
+        console.warn('System AI start failed, falling back to basic summary');
+        return {
+          summary: `Compressed ${messagesToCompress.length} message(s)`,
+          keyDecisions: [],
+          filesModified: messagesToCompress.map(m => m.content.split('\n').filter(l => l.includes('file'))[0] || 'Unknown'),
+          timestamp: Date.now(),
+        };
+      }
+    }
+
     const response = await systemClient.sendMessage(`${compressionPrompt}\n\nHere is the conversation to compress:\n${messagesText}`);
     
     // Parse JSON from AI response (may include markdown code fences)
@@ -128,7 +153,7 @@ async function compressMessages(
     };
   } catch (err) {
     // Fallback: if System AI is unavailable, create a basic summary from the text itself
-    const truncatedText = messagesText.slice(0, 2000); // Limit to avoid memory issues
+    const truncatedText = messagesText.slice(0, 2000);
     return {
       summary: `Compressed ${messagesToCompress.length} message(s) — ${truncatedText.substring(0, 500)}...`,
       keyDecisions: [],
@@ -187,28 +212,34 @@ export function getActiveWindow(
   return messages.filter(m => !existingSummaryIds.includes(m.content));
 }
 
-// Generate the full context for a given turn (compressed history + active window)
+/**
+ * Generate the full context for a given turn.
+ * This function combines compressed history as preamble with active window messages,
+ * producing both the system prompt and the message array ready for LLM consumption.
+ */
 export function generateFullContext(
   compressedHistory: CompressedEntry[],
   activeMessages: Array<{ id: string; role: string; content: string }>,
-): { systemPrompt: string; messages: Array<{ role: string; content: string }> } {
+): { 
+  /** Preamble text to prepend to system prompt — contains summarized earlier conversation */
+  preamble: string | null;
+  /** Active window messages for the LLM */
+  activeMessages: Array<{ role: string; content: string }>;
+} {
   // Build the context preamble from compressed history
-  const preamble = compressedHistory.length > 0 ? `Earlier conversation summary:\n${compressedHistory.map(e => 
-    `- ${e.summary}\n  Decisions: ${e.keyDecisions.join('; ')}\n  Files modified: ${e.filesModified.join(', ')}\n`
-  ).join('\n')}` : '';
+  const preamble = compressedHistory.length > 0 
+    ? `Earlier conversation summary:\n${compressedHistory.map(e => 
+      `- ${e.summary}\n  Decisions: ${e.keyDecisions.join('; ')}\n  Files modified: ${e.filesModified.join(', ')}\n`
+    ).join('\n')}` 
+    : null;
 
-  // Build the message array for the LLM (compressed history as system prompt, active window as messages)
-  const systemPrompt = preamble 
-    ? `You are an AI coding assistant. Here is context from earlier in your session:\n\n${preamble}\n---\nCurrent conversation:` 
-    : 'You are an AI coding assistant.';
+  // Convert active messages to LLM-compatible format (role mapping)
+  const mappedMessages = activeMessages.map(m => ({
+    role: m.role === 'user' ? 'user' as const : 'assistant' as const,
+    content: m.content,
+  }));
 
-  // Convert to LLM-compatible format (compressed history goes as a single system message)
-  const messages = [
-    { role: 'system' as const, content: systemPrompt },
-    ...activeMessages.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant' as const, content: m.content })),
-  ];
-
-  return { systemPrompt, messages };
+  return { preamble, activeMessages: mappedMessages };
 }
 
 // Check if compression should be triggered (without actually doing it)

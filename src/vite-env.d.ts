@@ -85,6 +85,8 @@ interface Window {
     engineLogging: {
       start: (engineId: 'primary' | 'systemAI') => Promise<{ started: boolean; sessionId?: string }>;
       stop: (engineId: 'primary' | 'systemAI') => Promise<{ stopped: boolean }>;
+      getLogEntries: (engineId: 'primary' | 'systemAI', includeDisk?: boolean) => Promise<Array<{ id: string; timestamp: number; level: string; message: string; source: 'primary' | 'systemAI' }>>;
+      clearLogEntries: (engineId: 'primary' | 'systemAI') => Promise<void>;
       getConfig: () => Promise<{ enableDiskLogging: boolean; maxMemoryEntriesPerEngine: number }>;
       setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => Promise<{ saved: boolean }>;
       onEngineData: (callback: (data: unknown) => void) => () => void;

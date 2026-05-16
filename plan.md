@@ -2,11 +2,11 @@
 
 > An open-source, local-first AI coding agent that bundles its own llama.cpp inference engine, provides built-in HuggingFace model downloading with modern authentication, and delivers agentic capabilities (file editing, terminal execution, MCP tool integration) with transparent approval gates. Built-in Git tracking gives every change automatic version control. All code is hosted at [github.com/Yonneh0/OpenLLMCode](https://github.com/Yonneh0/OpenLLMCode).
 
-> ✅ **Phase A — Foundation implemented**: Core Electron shell, Engine Manager, chat UI, Git operations, Zustand stores.
+> ✅ **Phase A — Foundation implemented** (100%): Core Electron shell, Engine Manager, chat UI, Git operations, Zustand stores. (Post-audit: CommonJS require() violations fixed in electron/main.ts and src/engine/manager.ts)
 > ✅ **Phase B — HuggingFace & Chat Richness implemented** (92%): HF auth/download, streaming UI, Markdown rendering, generation params panel. Missing: download queue wiring, regenerate button.
-> ✅ **Phase C — Agent Core & Git Integration implemented**: Tool registry (10 tools), approval gate UI, task lifecycle, checkpoint rollback, auto-commit/stash.
+> ✅ **Phase C — Agent Core & Git Integration implemented** (100%): Tool registry (10 tools), approval gate UI, task lifecycle, checkpoint rollback, auto-commit/stash. (Post-audit: CheckpointPanel now self-contained with IPC calls)
 > ✅ **Phase D — Editor, Terminal & Project Tooling implemented** (95%): Monaco Editor integration, xterm.js PTY terminal with streaming, project creation wizard with templates and repo cloning. Missing: split view, image preview, clone auth options.
-> 🟡 **Phase E — MCP, Context Compression & Monitoring** (60%): MCP server manager + context compression engine exist but have critical gaps (engineLoggerStore placeholders, MCP tools not registered, HTTP transport broken).
+> 🟡 **Phase E — MCP, Context Compression & Monitoring** (70%): MCP server manager + context compression engine exist but have critical gaps (engineLoggerStore placeholders, MCP tools not registered, HTTP transport broken). (Post-audit: McpPanel component created for live status display)
 > 🔲 **Phase G — Agent Skills + Pingu Avatar**: Not implemented. Needs full implementation.
 
 ---
@@ -986,12 +986,12 @@ All registered in `electron/main.ts`:
 
 | Phase | Status | Completeness |
 |-------|--------|-------------|
-| A — Foundation | ✅ Complete | 100% |
+| A — Foundation | ✅ Complete | 100% (CommonJS violations fixed) |
 | B — HuggingFace & Chat Richness | 🟡 Mostly Complete | ~92% |
-| C — Agent Core & Git Integration | ✅ Complete | 100% |
+| C — Agent Core & Git Integration | ✅ Complete | 100% (CheckpointPanel self-contained) |
 | D — Editor, Terminal & Project Tooling | 🟡 Mostly Complete | ~95% |
-| E — MCP, Context Compression & Monitoring | 🔴 Partial | ~60% |
+| E — MCP, Context Compression & Monitoring | 🔴 Partial | ~70% |
 | F — Polish & Launch | 🟡 Partial | ~75% |
 | G — Agent Skills + Pingu Avatar | 🔲 Not Started | 0% |
 
-**Overall: ~82% complete.** The most critical gaps are in Phase E where the engine logging store is full of placeholders and MCP tools aren't wired to the agent.
+**Overall: ~83% complete.** The most critical remaining gaps are in Phase E where the engine logging store is full of placeholders, MCP tools aren't wired to the agent's tool registry, and HTTP transport is broken.

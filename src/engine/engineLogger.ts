@@ -313,10 +313,9 @@ export function setEngineLoggerConfig(config: Partial<EngineLoggerConfig>): void
   loggerConfig = { ...loggerConfig, ...config };
   
   // Update existing session's max entries if changed
-  const engineId: 'primary' | 'systemAI' = config.maxMemoryEntriesPerEngine !== undefined ? 
-    (primarySession?.engineId || 'primary') : ('systemAI');
+  const needsPrimaryUpdate = config.maxMemoryEntriesPerEngine !== undefined;
     
-  for (const [id, session] of [[engineId === 'primary' ? 'primary' : 'systemAI', primarySession], ['systemAI', systemAISession]] as const) {
+  for (const [id, session] of [['primary', primarySession], ['systemAI', systemAISession]] as const) {
     if (session && config.maxMemoryEntriesPerEngine !== undefined) {
       session.maxEntries = config.maxMemoryEntriesPerEngine;
     }
