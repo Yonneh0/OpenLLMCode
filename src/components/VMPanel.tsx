@@ -9,10 +9,10 @@ import { useVMStore, VMSidebarTabInfo } from '../store/vmStore';
 // ─── State badge mapping ──────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any — VM state is any at runtime (per QEMU QMP spec)
 const STATE_CONFIG: Record<string, { bg: string; text: string; label: string }> = {
-  running:     { bg: '#4EC9B0/20', text: '#4EC9B0', label: 'Running' },
-  paused:      { bg: '#DCDCAA/20', text: '#DCDCAA', label: 'Paused' },
-  'shutdown-request': { bg: '#C9CB95/20', text: '#C9CB95', label: 'Shutting Down' },
-  stopped:     { bg: '#F44747/20', text: '#F44747', label: 'Stopped' },
+   running:     { bg: '#4EC9B0/20', text: '#4EC9B0', label: 'Running' },
+   paused:      { bg: '#DCDCAA/20', text: '#DCDCAA', label: 'Paused' },
+   'shutdown-request': { bg: '#C9CB95/20', text: '#C9CB95', label: 'Shutting Down' },
+   stopped:     { bg: '#F44747/20', text: '#F44747', label: 'Stopped (deprecated — use shutdown-request)' },
   debug:       { bg: '#6c7086/20', text: '#6c7086', label: 'Debug' },
   internal:    { bg: '#6c7086/20', text: '#6c7086', label: 'Internal' },
   finishReset:     { bg: '#6c7086/20', text: '#6c7086', label: 'Finish Reset' },
@@ -71,8 +71,8 @@ const VMInstanceCard: React.FC<VMInstanceCardProps> = ({ vm }) => {
   const stopVM = useVMStore((s) => s.stopVM);
   const deleteVM = useVMStore((s) => s.deleteVM);
 
-  // Extend state type to include 'stopped' for display purposes (not in QMP enum)  
-  const displayState = vm.state as any;  // eslint-disable-line @typescript-eslint/no-explicit-any — QEMU state is dynamic at runtime
+  // Use the typed VM_RUN_STATE value directly — no cast needed since it's already typed
+  const displayState = vm.state;
   const stateConfig = STATE_CONFIG[displayState] || { bg: '#6c7086/20', text: '#6c7086', label: displayState };
   const ramMB = Math.round(vm.ramBytes / (1024 ** 2));
 
@@ -130,7 +130,7 @@ const VMInstanceCard: React.FC<VMInstanceCardProps> = ({ vm }) => {
           </>
         )}
 
-        {displayState === 'stopped' && (
+        {(displayState === 'shutdown-request' || displayState === 'internal') && (
           <button
             onClick={() => startVM(vm.id)}
             className="px-2 py-0.5 rounded bg-[#4EC9B0]/20 hover:bg-[#4EC9B0]/30 text-xs transition"

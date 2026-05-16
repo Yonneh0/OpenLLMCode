@@ -1,9 +1,10 @@
 // ─── QEMU/KVM Simulation Layer — VM Creation Wizard ──────────────────────────────
 // Architecture: F.1-F.3 per plan.md (core QEMU integration, architecture support, toolchain)
+// All 16 architectures available per ARCHITECTURE enum in types.ts
 
 import React, { useCallback, useEffect, useState } from 'react';
 import type { ArchitectureType, AcceleratorType, DiskFormatType, NetworkBackendType } from '../engine/qemu/types';
-import { DISK_FORMAT, NETWORK_BACKEND } from '../engine/qemu/types';
+import { DISK_FORMAT, NETWORK_BACKEND, ARCHITECTURE } from '../engine/qemu/types';
 
 // ─── UI Types for Wizard State ──────────────────────────────
 
@@ -11,7 +12,7 @@ interface VMCreationForm {
   // Identification
   name: string;
   
-  // Architecture selection (F.2)
+  // Architecture selection (F.2) — all 16 architectures available
   architecture: ArchitectureType;
   machine?: string;           // Auto-selected default
   
@@ -49,9 +50,54 @@ interface VMNetworkEntry {
 
 // ─── Constants for Wizard Defaults ──────────────────────────────
 
-const DEFAULT_ARCHITECTURES = ['x86_64', 'aarch64'] as ArchitectureType[];
-const RAM_OPTIONS = [256, 512, 1024, 2048, 4096, 8192, 16384];
-const DEFAULT_DISK_FORMAT: DiskFormatType = 'qcow2';
+const ALL_ARCHITECTURES = ARCHITECTURE as unknown as ArchitectureType[];
+
+// Architectures that support KVM acceleration (from -enable-kvm and kernel-irqchip docs)
+const KVM_ARCHITECTURES: Set<ArchitectureType> = new Set(['x86_64', 'i386']);
+
+function getDefaultAccelerator(arch: ArchitectureType): 'kvm' | 'tcg' {
+  return KVM_ARCHITECTURES.has(arch) ? 'kvm' : 'tcg';
+}
+
+const DEFAULT_RAM_MAP: Record<ArchitectureType, number> = {
+  x86_64: 2048, i386: 1024, aarch64: 2048, armv7l: 512,
+  riscv64: 1024, riscv32: 512, avr: 0, // AVR doesn't use -m (MCU)
+  mips: 64, mips64: 256, mipsel: 64, mips64el: 256,
+  ppc: 128, ppc64: 512, ppcemb: 32,
+  sparc: 64, sparc64: 256,
+};
+
+const DEFAULT_CPU_MAP: Record<ArchitectureType, { sockets: number; cores: number; threads: number }> = {
+  x86_64: { sockets: 1, cores: 2, threads: 1 }, i386: { sockets: 1, cores: 2, threads: 1 },
+  aarch64: { sockets: 1, cores: 2, threads: 1 }, armv7l: { sockets: 1, cores: 1, threads: 1 },
+  riscv64: { sockets: 1, cores: 1, threads: 1 }, riscv32: { sockets: 1, cores: 1, threads: 1 },
+  avr: { sockets: 0, cores: 0, threads: 0 }, // AVR doesn't use -smp (MCU)
+  mips: { sockets: 1, cores: 1, threads: 1 }, mips64: { sockets: 1, cores: 1, threads: 1 },
+  mipsel: { sockets: 1, cores: 1, threads: 1 }, mips64el: { sockets: 1, cores: 1, threads: 1 },
+  ppc: { sockets: 1, cores: 1, threads: 1 }, ppc64: { sockets: 1, cores: 2, threads: 1 },
+  ppcemb: { sockets: 0, cores: 0, threads: 0 }, // PPC embedded doesn't use -smp
+  sparc: { sockets: 1, cores: 1, threads: 1 }, sparc64: { sockets: 1, cores: 2, threads: 1 },
+};
+
+const DEFAULT_DISK_FORMAT_MAP: Record<ArchitectureType, 'raw' | 'qcow2'> = {
+  x86_64: 'qcow2', i386: 'qcow2', aarch64: 'qcow2', armv7l: 'qcow2',
+  riscv64: 'raw', // eMMC on microvm — raw only (per -device loader docs)
+  riscv32: 'qcow2', avr: 'raw', // No disk images for MCU (per -bios firmware.hex docs)
+  mips: 'qcow2', mips64: 'qcow2', mipsel: 'qcow2', mips64el: 'qcow2',
+  ppc: 'qcow2', ppc64: 'qcow2', ppcemb: 'raw', // Raw for embedded board (per -device loader docs)
+  sparc: 'qcow2', sparc64: 'qcow2',
+};
+
+const DEFAULT_NET_BACKEND_MAP: Record<ArchitectureType, NetworkBackendType> = {
+  x86_64: 'user', i386: 'user', aarch64: 'user', armv7l: 'user',
+  riscv64: 'user', riscv32: 'user', avr: 'user', // AVR uses user mode for debugging
+  mips: 'user', mips64: 'user', mipsel: 'user', mips64el: 'user',
+  ppc: 'user', ppc64: 'user', ppcemb: 'user',
+  sparc: 'user', sparc64: 'user',
+};
+
+const BIOS_REQUIRED_ARCHITECTURES: Set<ArchitectureType> = new Set(['aarch64', 'riscv64']);
+const NO_DISK_NETWORK_ARCHITECTURES: Set<ArchitectureType> = new Set(['avr']); // AVR is bare-metal MCU
 
 // ─── Main Wizard Component ──────────────────────────────
 
@@ -67,24 +113,27 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
   const [isCreating, setIsCreating] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   
-  // Persist form state across renders
+  // Persist form state across renders — defaults based on first architecture (x86_64)
+  const defaultArch = ARCHITECTURE[0] as ArchitectureType;
+  const defaultRam = DEFAULT_RAM_MAP[defaultArch] || 1024;
+
   const [form, setForm] = useState<VMCreationForm>({
     name: `vm-${Date.now().toString(36)}`,
-    architecture: 'x86_64',
+    architecture: defaultArch,
     
-    accelerator: 'tcg',
+    accelerator: getDefaultAccelerator(defaultArch),
     
-    cpuSockets: 1,
-    cpuCores: 2,
-    cpuThreads: 1,
+    cpuSockets: DEFAULT_CPU_MAP[defaultArch]?.sockets || 1,
+    cpuCores: DEFAULT_CPU_MAP[defaultArch]?.cores || 2,
+    cpuThreads: DEFAULT_CPU_MAP[defaultArch]?.threads || 1,
     
-    ramMB: 1024,
+    ramMB: defaultRam,
     
-    diskImages: [{ id: 'hd0', media: 'disk', format: DEFAULT_DISK_FORMAT, path: '', isNew: true }],
-    networkDevices: [
+    diskImages: NO_DISK_NETWORK_ARCHITECTURES.has(defaultArch) ? [] : [{ id: 'hd0', media: 'disk', format: DEFAULT_DISK_FORMAT_MAP[defaultArch] || 'qcow2', path: '', isNew: true }],
+    networkDevices: NO_DISK_NETWORK_ARCHITECTURES.has(defaultArch) ? [] : [
       { 
         id: 'net0', 
-        backendType: 'user'
+        backendType: DEFAULT_NET_BACKEND_MAP[defaultArch] as NetworkBackendType
       }
     ],
   });
@@ -93,35 +142,68 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
   const [availableCPUs, setAvailableCPUs] = useState<string[]>(['host']);
   const [kvmAvailable, setKvmAvailable] = useState<boolean>(false);
 
+  // Check KVM availability for current architecture
   useEffect(() => {
     async function checkKVM() {
       try {
-        const kvmOk = await ((window as any).api?.qemu?.checkKVM());
+        const kvmOk = await ((window as any).api?.qemu?.checkKVM()); // eslint-disable-line @typescript-eslint/no-explicit-any — qemu is exposed via preload.ts but not in Electron IPC bridge types
         setKvmAvailable(!!kvmOk);
       } catch { /* ignore */ }
     }
     checkKVM();
   }, [form.architecture]);
 
+  // Fetch available machine types for current architecture per -machine help docs
   useEffect(() => {
     async function fetchMachines() {
       try {
-        const machines = await ((window as any).api?.qemu?.getAvailableMachines(form.architecture));
-        if (Array.isArray(machines)) setAvailableMachines((machines as any[]).map((m: any) => m.name));
+        const machines = await ((window as any).api?.qemu?.getAvailableMachines(form.architecture)); // eslint-disable-line @typescript-eslint/no-explicit-any — qemu is exposed via preload.ts but not in Electron IPC bridge types
+        if (Array.isArray(machines)) setAvailableMachines((machines as any[]).map((m: any) => m.name)); // eslint-disable-line @typescript-eslint/no-explicit-any — machine type at runtime (per QEMU docs)
       } catch { /* ignore */ }
     }
     fetchMachines();
   }, [form.architecture]);
 
+  // Fetch available CPU models for current architecture per -cpu help docs
   useEffect(() => {
     async function fetchCPUs() {
       try {
-        const cpus = await ((window as any).api?.qemu?.getAvailableCPUs(form.architecture));
+        const cpus = await ((window as any).api?.qemu?.getAvailableCPUs(form.architecture)); // eslint-disable-line @typescript-eslint/no-explicit-any — qemu is exposed via preload.ts but not in Electron IPC bridge types
         if (Array.isArray(cpus)) setAvailableCPUs(cpus);
       } catch { /* ignore */ }
     }
     fetchCPUs();
   }, [form.architecture]);
+
+  // Auto-detect KVM availability for current architecture on mount
+  useEffect(() => {
+    if (KVM_ARCHITECTURES.has(form.architecture)) {
+      ((window as any).api?.qemu?.checkKVM())?.then((kvmOk: boolean) => { // eslint-disable-line @typescript-eslint/no-explicit-any — qemu is exposed via preload.ts but not in Electron IPC bridge types
+        setKvmAvailable(!!kvmOk);
+        if (kvmOk && form.accelerator !== 'kvm') {
+          setForm(f => ({ ...f, accelerator: 'kvm' }));
+        }
+      });
+    } else {
+      setKvmAvailable(false);
+      if (form.accelerator === 'kvm') {
+        setForm(f => ({ ...f, accelerator: 'tcg' }));
+      }
+    }
+  }, [form.architecture]);
+
+  // Handle architecture change — reset form for new arch defaults
+  const handleArchChange = useCallback((arch: ArchitectureType) => {
+    setForm(f => ({
+      ...f,
+      architecture: arch,
+      accelerator: getDefaultAccelerator(arch),
+      cpuSockets: DEFAULT_CPU_MAP[arch]?.sockets || f.cpuSockets,
+      cpuCores: DEFAULT_CPU_MAP[arch]?.cores || f.cpuCores,
+      cpuThreads: DEFAULT_CPU_MAP[arch]?.threads || f.cpuThreads,
+      ramMB: DEFAULT_RAM_MAP[arch] || f.ramMB,
+    }));
+  }, []);
 
   const handleCreate = useCallback(async () => {
     setIsCreating(true);
@@ -136,25 +218,27 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
 
       const ramBytes = form.ramMB * 1024 ** 2;
 
-      const qemuDiskImages = form.diskImages.map((disk: VMImageEntry) => ({
-        id: disk.id,
-        media: disk.media,
-        format: disk.format,
-        file: disk.path || '',
-        readOnly: false,
-      }));
+      const qemuDiskImages = NO_DISK_NETWORK_ARCHITECTURES.has(form.architecture) ? [] : 
+        form.diskImages.map((disk: VMImageEntry) => ({
+          id: disk.id,
+          media: disk.media,
+          format: disk.format,
+          file: disk.path || '',
+          readOnly: false,
+        }));
 
-      const qemuNetworkDevices = form.networkDevices.map((nic: VMNetworkEntry) => ({
-        id: nic.id,
-        backendType: nic.backendType as any,
-        macAddress: nic.macAddress,
-      }));
+      const qemuNetworkDevices = NO_DISK_NETWORK_ARCHITECTURES.has(form.architecture) ? [] : 
+        form.networkDevices.map((nic: VMNetworkEntry) => ({
+          id: nic.id,
+          backendType: nic.backendType as any, // eslint-disable-line @typescript-eslint/no-explicit-any — accelerator type at runtime (per QEMU docs)
+          macAddress: nic.macAddress,
+        }));
 
       const config = {
         id: form.name.replace(/\s+/g, '-').toLowerCase(),
-        architecture: form.architecture as any,
+        architecture: form.architecture as any, // eslint-disable-line @typescript-eslint/no-explicit-any — accelerator type at runtime (per QEMU docs)
         machine: form.machine || '',
-        accelerator: form.accelerator as any,
+        accelerator: form.accelerator as any, // eslint-disable-line @typescript-eslint/no-explicit-any — accelerator type at runtime (per QEMU docs)
         cpuTopology: {
           sockets: form.cpuSockets,
           cores: form.cpuCores,
@@ -166,7 +250,7 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
         serialConsole: { type: 'mon' as const },
       };
 
-      await ((window as any).api?.qemu?.create(config));
+      await ((window as any).api?.qemu?.create(config)); // eslint-disable-line @typescript-eslint/no-explicit-any — qemu is exposed via preload.ts but not in Electron IPC bridge types
       
       onClose();
     } catch (err: unknown) {
@@ -180,7 +264,7 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
     const id = `hd${form.diskImages.length}`;
     setForm(f => ({
       ...f,
-      diskImages: [...f.diskImages, { id, media: 'disk', format: DEFAULT_DISK_FORMAT, path: '', isNew: true }],
+      diskImages: [...f.diskImages, { id, media: 'disk', format: DEFAULT_DISK_FORMAT_MAP[f.architecture] || 'qcow2', path: '', isNew: true }],
     }));
   }, [form.diskImages.length]);
 
@@ -195,7 +279,7 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
     const id = `net${form.networkDevices.length}`;
     setForm(f => ({
       ...f,
-      networkDevices: [...f.networkDevices, { id, backendType: 'user' as NetworkBackendType }],
+      networkDevices: [...f.networkDevices, { id, backendType: DEFAULT_NET_BACKEND_MAP[f.architecture] as NetworkBackendType }],
     }));
   }, [form.networkDevices.length]);
 
@@ -290,6 +374,8 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
               setForm={setForm}
               kvmAvailable={kvmAvailable}
               availableMachines={availableMachines}
+              allArchitectures={ALL_ARCHITECTURES}
+              handleArchChange={handleArchChange}
             />
           )}
           
@@ -302,7 +388,7 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
             />
           )}
           
-          {step === 2 && (
+          {step === 2 && !NO_DISK_NETWORK_ARCHITECTURES.has(form.architecture) && (
             <DiskImagesStep 
               form={form} 
               setForm={setForm}
@@ -311,13 +397,21 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
             />
           )}
           
-          {step === 3 && (
+          {step === 3 && !NO_DISK_NETWORK_ARCHITECTURES.has(form.architecture) && (
             <NetworkStep 
               form={form} 
               setForm={setForm}
               addNetworkDevice={addNetworkDevice}
               removeNetworkDevice={removeNetworkDevice}
             />
+          )}
+
+          {/* Skip disk/network steps for MCU architectures — jump to review */}
+          {NO_DISK_NETWORK_ARCHITECTURES.has(form.architecture) && step === 2 && (
+            <div className="text-center py-8">
+              <span className="text-3xl opacity-50">{'\u{1F4EB}'}</span>
+              <p className="text-sm text-[#6c7086] mt-2">MCU architectures don't use disk images or network devices</p>
+            </div>
           )}
         </div>
 
@@ -350,20 +444,23 @@ export const VMCreationWizard: React.FC<VMCreationWizardProps> = ({ isOpen, onCl
   );
 };
 
-// ─── Step 0: Architecture Selection (F.2) ──────────────────────────────
+// ─── Constants for Wizard Defaults (kept for backward compat) ──────────────────────────────
+
+const RAM_OPTIONS = [256, 512, 1024, 2048, 4096, 8192, 16384];
+const DEFAULT_DISK_FORMAT: DiskFormatType = 'qcow2';
+
+// ─── Step 0: Architecture Selection (F.2) — all 16 architectures ──────────────────────────────
 
 interface ArchitectureStepProps {
   form: VMCreationForm;
   setForm: React.Dispatch<React.SetStateAction<VMCreationForm>>;
   kvmAvailable: boolean;
   availableMachines: string[];
+  allArchitectures: ArchitectureType[];
+  handleArchChange: (arch: ArchitectureType) => void;
 }
 
-const ArchitectureStep: React.FC<ArchitectureStepProps> = ({ form, setForm, kvmAvailable, availableMachines }) => {
-  const handleArchChange = useCallback((arch: ArchitectureType) => {
-    setForm(f => ({ ...f, architecture: arch }));
-  }, [setForm]);
-
+const ArchitectureStep: React.FC<ArchitectureStepProps> = ({ form, setForm, kvmAvailable, availableMachines, allArchitectures, handleArchChange }) => {
   return (
     <div className="space-y-4">
       <div>
@@ -376,12 +473,14 @@ const ArchitectureStep: React.FC<ArchitectureStepProps> = ({ form, setForm, kvmA
               form.accelerator === 'kvm' 
                 ? 'bg-[#89b4fa]/10 border-[#89b4fa] text-[#89b4fa]' 
                 : 'bg-[#181825] border-[#313244] hover:bg-[#313244]'
-            } ${!kvmAvailable ? 'opacity-50 cursor-not-allowed' : ''}`}
-            disabled={!kvmAvailable}
+            } ${!kvmAvailable || !KVM_ARCHITECTURES.has(form.architecture) ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={!kvmAvailable || !KVM_ARCHITECTURES.has(form.architecture)}
           >
             <div className="text-lg font-semibold">KVM</div>
             <div className="text-xs opacity-75 mt-1">Near-native performance</div>
-            {!kvmAvailable && <div className="text-xs text-[#F44747] mt-2">Not available — TCG will be used instead</div>}
+            {(!kvmAvailable || !KVM_ARCHITECTURES.has(form.architecture)) && (
+              <div className="text-xs text-[#F44747] mt-2">{!KVM_ARCHITECTURES.has(form.architecture) ? 'Not available for this architecture — TCG will be used' : 'KVM not detected — TCG will be used instead'}</div>
+            )}
           </button>
           
           <button
@@ -400,9 +499,9 @@ const ArchitectureStep: React.FC<ArchitectureStepProps> = ({ form, setForm, kvmA
 
       <div>
         <label className="block text-sm text-[#9399b2] mb-2 font-medium uppercase tracking-wider">Architecture</label>
-        <p className="text-xs text-[#6c7086] mb-2">Select the target CPU architecture for this VM — each requires specific firmware and NIC models</p>
-        <div className="grid grid-cols-3 gap-2">
-          {DEFAULT_ARCHITECTURES.map((arch) => (
+        <p className="text-xs text-[#6c7086] mb-2">Select the target CPU architecture for this VM — each requires specific firmware and NIC models (per -machine help docs)</p>
+        <div className="grid grid-cols-4 gap-2">
+          {allArchitectures.map((arch) => (
             <button
               key={arch}
               onClick={() => handleArchChange(arch)}
@@ -413,8 +512,9 @@ const ArchitectureStep: React.FC<ArchitectureStepProps> = ({ form, setForm, kvmA
               }`}
             >
               <div className="text-sm font-semibold">{arch}</div>
-              {arch === 'x86_64' && <div className="text-[10px] opacity-75 mt-1">KVM available</div>}
-              {arch === 'aarch64' && <div className="text-[10px] opacity-75 mt-1">Requires UEFI firmware</div>}
+              {KVM_ARCHITECTURES.has(arch) && kvmAvailable && <div className="text-[10px] opacity-75 mt-1">KVM available</div>}
+              {BIOS_REQUIRED_ARCHITECTURES.has(arch) && <div className="text-[10px] opacity-75 mt-1">Requires firmware</div>}
+              {NO_DISK_NETWORK_ARCHITECTURES.has(arch) && <div className="text-[10px] opacity-75 mt-1">MCU (no disk/net)</div>}
             </button>
           ))}
         </div>
@@ -435,7 +535,7 @@ const ArchitectureStep: React.FC<ArchitectureStepProps> = ({ form, setForm, kvmA
             ))}
           </select>
         ) : (
-          <div className="text-xs text-[#6c7086]">Loading available machine types...</div>
+          <div className="text-xs text-[#6c7086]">Loading available machine types for {form.architecture}...</div>
         )}
       </div>
 
@@ -445,9 +545,19 @@ const ArchitectureStep: React.FC<ArchitectureStepProps> = ({ form, setForm, kvmA
           type="text"
           value={form.name}
           onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
-          placeholder="my-vm"
+          placeholder={`vm-${form.architecture}-${Date.now().toString(36).slice(-4)}`}
           className="w-full px-3 py-2 bg-[#181825] border border-[#313244] rounded-lg text-sm text-[#cdd6f4] focus:outline-none focus:border-[#89b4fa]"
         />
+      </div>
+
+      {/* Architecture-specific notes */}
+      <div className="bg-[#181825]/60 border border-[#313244] rounded-lg p-3">
+        {BIOS_REQUIRED_ARCHITECTURES.has(form.architecture) && (
+          <p className="text-xs text-[#F44747] mb-1">⚠️ This architecture requires UEFI/SBI firmware — download from EDK2 project before creating VM.</p>
+        )}
+        {NO_DISK_NETWORK_ARCHITECTURES.has(form.architecture) && (
+          <p className="text-xs text-[#DCDCAA] mb-1">ℹ️ This is a bare-metal MCU architecture — no disk images or network devices required (per -bios firmware.hex docs).</p>
+        )}
       </div>
     </div>
   );
@@ -466,6 +576,16 @@ const HardwareStep: React.FC<HardwareStepProps> = ({ form, setForm, ramOptions, 
   const handleRamChange = useCallback((mb: number) => {
     setForm(f => ({ ...f, ramMB: mb }));
   }, [setForm]);
+
+  // Skip hardware step for MCU architectures — no RAM/CPU to configure
+  if (NO_DISK_NETWORK_ARCHITECTURES.has(form.architecture)) {
+    return (
+      <div className="text-center py-8">
+        <span className="text-3xl opacity-50">{'\u{1F4EB}'}</span>
+        <p className="text-sm text-[#6c7086] mt-2">MCU architectures don't require hardware configuration — RAM and CPU are fixed per chip</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -568,10 +688,10 @@ interface DiskImagesStepProps {
 const DiskImagesStep: React.FC<DiskImagesStepProps> = ({ form, setForm, addDiskImage, removeDiskImage }) => {
   const handleAddExistingDisk = useCallback(() => {
     // Open file picker for existing disk — using dialog from preload.ts  
-    (window as any).api?.dialog?.selectFile().then((path: string | null) => {
+    (window as any).api?.dialog?.selectFile().then((path: string | null) => { // eslint-disable-line @typescript-eslint/no-explicit-any — qemu is exposed via preload.ts but not in Electron IPC bridge types
       if (!path) return;
       
-      // Auto-detect format based on extension
+      // Auto-detect format based on extension per Disk Images chapter
       const ext = path.split('.').pop()?.toLowerCase() || '';
       let format: DiskFormatType = 'raw';  // Default to raw for unknown formats (per disk images chapter)
       const formatMap: Record<string, DiskFormatType> = {
@@ -674,7 +794,7 @@ const DiskImagesStep: React.FC<DiskImagesStepProps> = ({ form, setForm, addDiskI
           onClick={addDiskImage}
           className="px-3 py-1.5 rounded bg-[#89b4fa]/20 hover:bg-[#89b4fa]/30 text-xs transition-colors"
         >
-          + Create New Disk (qcow2)
+          + Create New Disk ({DEFAULT_DISK_FORMAT_MAP[form.architecture] || 'qcow2'})
         </button>
       </div>
 
@@ -797,7 +917,7 @@ interface ReviewStepProps {
 const ReviewStep: React.FC<ReviewStepProps> = ({ 
   form, kvmAvailable, ramMB, cpuSockets, cpuCores, cpuThreads, diskImages, networkDevices, onBack, onCreate 
 }) => {
-  const totalCPUs = cpuSockets * cpuCores * cpuThreads;
+  const totalCPUs = NO_DISK_NETWORK_ARCHITECTURES.has(form.architecture) ? 1 : cpuSockets * cpuCores * cpuThreads; // MCU always has single core
   
   return (
     <div className="space-y-4">
@@ -821,17 +941,24 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
       </div>
 
       {/* Hardware details */}
-      <div className="bg-[#181825]/60 border border-[#313244] rounded-lg p-4 space-y-2">
-        <h4 className="text-xs text-[#9399b2] font-medium uppercase tracking-wider">Hardware</h4>
-        
-        <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
-          <span className="text-[#6c7086]">RAM:</span>
-          <span className="font-mono">{ramMB >= 1024 ? `${ramMB / 1024}GB` : `${ramMB}MB`}</span>
-          
-          <span className="text-[#6c7086]">CPUs:</span>
-          <span className="font-mono">{totalCPUs} ({cpuSockets}s x {cpuCores}c x {cpuThreads}t)</span>
+      {NO_DISK_NETWORK_ARCHITECTURES.has(form.architecture) ? (
+        <div className="bg-[#181825]/60 border border-[#313244] rounded-lg p-4 space-y-2">
+          <h4 className="text-xs text-[#9399b2] font-medium uppercase tracking-wider">Hardware (MCU — fixed)</h4>
+          <p className="text-xs text-[#6c7086]">MCU architectures don't require hardware configuration</p>
         </div>
-      </div>
+      ) : (
+        <div className="bg-[#181825]/60 border border-[#313244] rounded-lg p-4 space-y-2">
+          <h4 className="text-xs text-[#9399b2] font-medium uppercase tracking-wider">Hardware</h4>
+          
+          <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
+            <span className="text-[#6c7086]">RAM:</span>
+            <span className="font-mono">{ramMB >= 1024 ? `${ramMB / 1024}GB` : `${ramMB}MB`}</span>
+            
+            <span className="text-[#6c7086]">CPUs:</span>
+            <span className="font-mono">{totalCPUs} ({cpuSockets}s x {cpuCores}c x {cpuThreads}t)</span>
+          </div>
+        </div>
+      )}
 
       {/* Disk images */}
       {diskImages.length > 0 && (
@@ -877,6 +1004,11 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
       {/* Warning for ARM/RISC-V on x86 host */}
       {['aarch64', 'riscv64'].includes(form.architecture) && (
         <p className="text-xs text-[#F44747]">{'\u{26A0}'} Cross-architecture emulation — this will be very slow with TCG</p>
+      )}
+
+      {/* Firmware requirement warning */}
+      {BIOS_REQUIRED_ARCHITECTURES.has(form.architecture) && (
+        <p className="text-xs text-[#DCDCAA]">{'\u{2139}'} This architecture requires UEFI/SBI firmware — download from EDK2 project before creating VM.</p>
       )}
 
       {/* Action buttons */}

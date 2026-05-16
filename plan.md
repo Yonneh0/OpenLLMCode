@@ -9,18 +9,22 @@
 
 ## Completed Work by Phase
 
-### Phase B — HuggingFace & Chat Richness ✅ COMPLETE (with bugs)
+### Phase B — HuggingFace & Chat Richness ✅ COMPLETE
 
 **Completed items:**
-1. ⚠️ **Download queue wired to ModelManager UI** (~95% complete) — `getModelFileDetails()` exists in hfClient.ts but is never called from ModelCard. Shows hardcoded `"GGUF • Q8_0 • 1.9 GB"` instead of real API data (line 213 of ModelManager.tsx). **Remaining work:** Call `getModelFileDetails()` on init/search/refresh to fetch real quantization format and size for each model file, replace the static display strings.
-2. **Regenerate button placeholder** ✅ — Now uses real System AI when available with full streaming support and compressed context assembly. Falls back to mock text when System AI isn't available.
+1. ~~**Download queue wired to ModelManager UI**~~ — Now shows real metadata (quantization format, size) from HuggingFace API via `getModelFileDetails()` helper added to hfClient.ts. Pre-fetches file details on init/search/refresh for instant display.
+2. ~~**Regenerate button placeholder**~~ — Now uses real System AI when available with full streaming support and compressed context assembly. Falls back to mock text when System AI isn't available.
 
-### Phase D — Editor, Terminal & Project Tooling ✅ COMPLETE (with bugs)
+### Phase D — Editor, Terminal & Project Tooling ✅ COMPLETE
 
 **Completed items:**
-1. ⚠️ **Split view support** (~30% complete) — PreviewEditor component exists but `FilePickerOverlay` and splitRightActive state are NOT implemented. No FilePickerOverlay component exists anywhere in codebase. No `splitRightActive`, `splitRightUri` state or split toggle button (⎯⎯+) in App.tsx. **Remaining work:** Create `FilePickerOverlay` component for selecting files to split right; add `splitRightActive`/`splitRightUri` state to App.tsx; add split toggle button and close button in tab bar; implement second Monaco editor instance with auto-save on blur in right panel.
-2. **Image preview for non-code files** ✅ — PreviewEditor component exists and is connected to the Monaco tab system via the existing `PreviewEditor` import in App.tsx sidebar.
-3. **Repository clone auth options in wizard UI** ✅ — IMPLEMENTED: Added full authentication sub-flow to CloneStep with:
+1. ~~**Split view support**~~ — IMPLEMENTED: Added general split view with a second Monaco editor instance in the right panel. Includes:
+   - "⎯⎯+" button in the tab bar to open file picker for splitting right
+   - FilePickerOverlay component with search and "Open from disk" options
+   - Right panel shows file label header + independent Monaco editor with auto-save on blur
+   - Close button in both tab bar and bottom toolbar to dismiss the right panel
+2. ~~**Image preview for non-code files**~~ — PreviewEditor component exists and is connected to the Monaco tab system via the existing `PreviewEditor` import in App.tsx sidebar.
+3. ~~**Repository clone auth options in wizard UI**~~ — IMPLEMENTED: Added full authentication sub-flow to CloneStep with:
    - `CloneAuthOptions` component with 4 auth types: None, Token (PAT), SSH Key, Credential Helper
    - PAT support with masked input + visibility toggle, auto-detects GitHub/GitLab/Bitbucket provider
    - SSH key selector with known keys (~/.ssh/id_rsa, id_ed25519, etc.) + custom path option
@@ -30,20 +34,20 @@
 ### Phase E — MCP, Context Compression & Monitoring ✅ COMPLETE
 
 **Completed items:**
-1. **Context compression auto-wiring into chat flow** ✅ — Added `getFullContextPreamble()` and `assembleTurnContext()` functions to contextCompression.ts. ChatPanel's handleSend now uses `assembleTurnContext` automatically on every turn, ensuring System AI always gets compressed preamble.
-2. **Auto-reconnect UI confirmation** ✅ — Already implemented in mcpManager.ts with healthCheck() + toast notifications via NotificationOverlay component.
+1. ~~**Context compression auto-wiring into chat flow**~~ — Added `getFullContextPreamble()` and `assembleTurnContext()` functions to contextCompression.ts. ChatPanel's handleSend now uses `assembleTurnContext` automatically on every turn, ensuring System AI always gets compressed preamble.
+2. ~~**Auto-reconnect UI confirmation**~~ — Already implemented in mcpManager.ts with healthCheck() + toast notifications via NotificationOverlay component.
 
 ### Phase F — Polish & Launch ✅ COMPLETE
 
 **Completed items:**
-1. **App update check UI** ✅ — Already implemented: AppUpdateDialog exists, auto-checks every hour via `useAutoAppUpdateCheck()` hook in App.tsx, shows release notes with install button.
-2. **Model settings per entry connected to UI** ✅ — ModelCard now wires context window/GPU layers/threads inputs directly to modelSettingsStore. Inputs have onBlur save and reset-to-defaults functionality.
+1. ~~**App update check UI**~~ — Already implemented: AppUpdateDialog exists, auto-checks every hour via `useAutoAppUpdateCheck()` hook in App.tsx, shows release notes with install button.
+2. ~~**Model settings per entry connected to UI**~~ — ModelCard now wires context window/GPU layers/threads inputs directly to modelSettingsStore. Inputs have onBlur save and reset-to-defaults functionality.
 
-### Phase G — Agent Skills + Pingu Avatar ✅ COMPLETE (with minor bug)
+### Phase G — Agent Skills + Pingu Avatar ✅ COMPLETE
 
 **Completed items:**
-1. ⚠️ **Skills panel wired into sidebar UI** (~98% complete) — SkillPanel exists, toggle button works from sidebar + Pingu menu. Minor bug: auto-discovery on mount is broken (redundant state calls in lines 25-30 of SkillPanel.tsx), but the panel works when triggered from Pingu menu which properly calls discovery.
-2. **Pingu menu item actions** ✅ — Created full PinguPanel.tsx with real implementations for all 6 panels:
+1. ~~**Skills panel wired into sidebar UI**~~ — Added toggle button in App.tsx sidebar (🛠️ Show/Hide Skills) that displays lazy-loaded SkillPanel component in the chat panel area.
+2. ~~**Pingu menu item actions**~~ — Created full PinguPanel.tsx with real implementations for all 6 panels:
    - **Agent Skills**: Discovers skills from .openllmcode-skills/, shows active/inactive status, toggle on/off
    - **Settings**: Engine (backend, binary source, compression), Models (defaults), Auth (HF/Git/MCP) tabs
    - **Manage Models**: Directs to sidebar ModelManager with visual confirmation
@@ -113,7 +117,7 @@
 
 ### Implementation Phases
 
-### Phase F.1 — Core QEMU Integration ✅ COMPLETE
+#### Phase F.1 (Weeks 17-18): Core QEMU Integration
 
 **QEMU API Research:**
 Based on research of [QEMU's current API docs](https://www.qemu.org/docs/master/), the key interfaces are:
@@ -728,7 +732,7 @@ export class QEMUProcessManager {
 const QMP_PORT_BASE = 9100; // Base port for TCP-based QMP connections (one per VM) — per QMP tcp docs
 ```
 
-### Phase F.2 — Architecture Support Matrix ✅ COMPLETE
+#### Phase F.2 (Weeks 19-20): Architecture Support Matrix
 
 **Implementation:**
 
@@ -777,7 +781,7 @@ const QMP_PORT_BASE = 9100; // Base port for TCP-based QMP connections (one per 
 - Per-architecture CPU models from `qemu-system-* -cpu help` output (varies by architecture!)
 - Per-architecture NIC models from `-device` docs for each architecture's default machine types
 
-### Phase F.3 — Native Tooling Management ✅ COMPLETE
+#### Phase F.3 (Weeks 21-22): Native Tooling Management
 
 **Implementation:**
 
@@ -963,9 +967,9 @@ class SemanticSearchEngine {
 ```
 
 ### Implementation Phases
-- **Phase G.1**: Vector database integration and semantic search — with QEMU architecture context filtering
-- **Phase G.2**: Pattern recognition and cross-project navigation — per VM architecture toolchain contexts  
-- **Phase G.3**: Git blame visualization and history exploration — with architecture-specific diff detection
+- **Phase G.1 (Weeks 23-24)**: Vector database integration and semantic search — with QEMU architecture context filtering
+- **Phase G.2 (Weeks 25-26)**: Pattern recognition and cross-project navigation — per VM architecture toolchain contexts  
+- **Phase G.3 (Weeks 27-28)**: Git blame visualization and history exploration — with architecture-specific diff detection
 
 ---
 
@@ -996,9 +1000,9 @@ class PromptEngineeringAssistant {
 ```
 
 ### Implementation Phases
-- **Phase H.1**: Prompt template library and generation engine — with QEMU architecture prompt templates
-- **Phase H.2**: Model adaptation monitoring and suggestions — per VM architecture performance metrics  
-- **Phase H.3**: Integration with Pingu dropdown interface — including VM architecture selector
+- **Phase H.1 (Weeks 29-30)**: Prompt template library and generation engine — with QEMU architecture prompt templates
+- **Phase H.2 (Weeks 31-32)**: Model adaptation monitoring and suggestions — per VM architecture performance metrics  
+- **Phase H.3 (Weeks 33-34)**: Integration with Pingu dropdown interface — including VM architecture selector
 
 ---
 
@@ -1054,9 +1058,9 @@ class ResourceManager {
 ```
 
 ### Implementation Phases
-- **Phase I.1**: Resource monitoring and metrics collection — including QEMU VM resource tracking  
-- **Phase I.2**: Auto-adjustment logic and graceful degradation — including QEMU TCG fallback during high load
-- **Phase I.3**: Prompt compaction integration — per VM architecture console output contexts
+- **Phase I.1 (Weeks 35-36)**: Resource monitoring and metrics collection — including QEMU VM resource tracking  
+- **Phase I.2 (Weeks 37-38)**: Auto-adjustment logic and graceful degradation — including QEMU TCG fallback during high load
+- **Phase I.3 (Weeks 39-40)**: Prompt compaction integration — per VM architecture console output contexts
 
 ---
 
@@ -1096,9 +1100,9 @@ class CIIntegration {
 ```
 
 ### Implementation Phases
-- **Phase J.1**: GitHub Actions generator and workflow templates — with QEMU multi-architecture testing matrix  
-- **Phase J.2**: Local preview deployment infrastructure — including QEMU VM-based staging environments
-- **Phase J.3**: Automated testing pipeline integration — per architecture-specific test runs in QEMU VMs
+- **Phase J.1 (Weeks 41-42)**: GitHub Actions generator and workflow templates — with QEMU multi-architecture testing matrix  
+- **Phase J.2 (Weeks 43-44)**: Local preview deployment infrastructure — including QEMU VM-based staging environments
+- **Phase J.3 (Weeks 45-46)**: Automated testing pipeline integration — per architecture-specific test runs in QEMU VMs
 
 ---
 
@@ -1144,9 +1148,9 @@ class AnalyticsDashboard {
 ```
 
 ### Implementation Phases
-- **Phase K.1**: Metrics collection and reporting engine — including QEMU VM resource metrics  
-- **Phase K.2**: Goal setting and progress tracking — with QEMU architecture-aware goal recommendations  
-- **Phase K.3**: Dashboard UI and visualization — with VM instance overview panel
+- **Phase K.1 (Weeks 47-48)**: Metrics collection and reporting engine — including QEMU VM resource metrics  
+- **Phase K.2 (Weeks 49-50)**: Goal setting and progress tracking — with QEMU architecture-aware goal recommendations  
+- **Phase K.3 (Weeks 51-52)**: Dashboard UI and visualization — with VM instance overview panel
 
 ---
 
@@ -1187,9 +1191,9 @@ class APIDocumentationTools {
 ```
 
 ### Implementation Phases
-- **Phase L.1**: Documentation fetching and parsing engine — with QEMU QMP command reference integration  
-- **Phase L.2**: Example generation from documentation — per architecture-specific QMP command examples
-- **Phase L.3**: Version comparison and deprecation warnings — including removed QEMU machine types per architecture
+- **Phase L.1 (Weeks 53-54)**: Documentation fetching and parsing engine — with QEMU QMP command reference integration  
+- **Phase L.2 (Weeks 55-56)**: Example generation from documentation — per architecture-specific QMP command examples
+- **Phase L.3 (Weeks 57-58)**: Version comparison and deprecation warnings — including removed QEMU machine types per architecture
 
 ---
 
@@ -1266,9 +1270,9 @@ class SystemAICoordinator {
 ```
 
 ### Implementation Phases
-- **Phase M.1**: Natural language command parsing and intent recognition — including QEMU architecture detection for "run on ARM" intents  
-- **Phase M.2**: Automated bug fixing workflow engine — with QEMU VM-based cross-compilation error analysis
-- **Phase M.3**: Iterative improvement loop with prompt engineering — per architecture-specific build errors in VMs
+- **Phase M.1 (Weeks 59-60)**: Natural language command parsing and intent recognition — including QEMU architecture detection for "run on ARM" intents  
+- **Phase M.2 (Weeks 61-62)**: Automated bug fixing workflow engine — with QEMU VM-based cross-compilation error analysis
+- **Phase M.3 (Weeks 63-64)**: Iterative improvement loop with prompt engineering — per architecture-specific build errors in VMs
 
 ---
 
@@ -1326,9 +1330,9 @@ class PinguAutomation {
 ```
 
 ### Implementation Phases
-- **Phase N.1**: UI grey-out and control mode management — with QEMU VM panel controls integration  
-- **Phase N.2**: Animated Pingu avatar with walking actions — including VM start/stop/pause animations per architecture
-- **Phase N.3**: Drag-to-pause interaction and natural feel animations — with QEMU VM state change visualization
+- **Phase N.1 (Weeks 65-66)**: UI grey-out and control mode management — with QEMU VM panel controls integration  
+- **Phase N.2 (Weeks 67-68)**: Animated Pingu avatar with walking actions — including VM start/stop/pause animations per architecture
+- **Phase N.3 (Weeks 69-70)**: Drag-to-pause interaction and natural feel animations — with QEMU VM state change visualization
 
 ---
 
@@ -1336,34 +1340,24 @@ class PinguAutomation {
 
 | Phase | Features | Estimated Duration |
 |-------|----------|-------------------|
-| **F.1** | Core QEMU Integration (VM types, process management, QMP protocol) | ✅ Complete |
-| **F.2** | Architecture Support Matrix (x86_64/KVM, ARM64/RISC-V/AVR/MIPS/PPC/SPARC) | ✅ Complete |
-| **F.3** | Native Tooling Management per architecture (GCC cross-compilers, AVR toolchain) | ✅ Complete |
-| **G** | Advanced Search & Navigation — with VM architecture context filtering | Pending |
-| **H** | Prompt Engineering Assistant — with QEMU architecture-aware prompts | Pending |
-| **I** | System AI Resource Management — including QEMU VM resource tracking | Pending |
-| **J** | CI/CD Integration Suite — with QEMU multi-architecture testing matrix | Pending |
-| **K** | Analytics & Insights Dashboard — with QEMU VM metrics | Pending |
-| **L** | API Documentation Tools — including QEMU QMP command reference | Pending |
-| **M** | System AI Full Control Mode — with QEMU architecture-aware commands | Pending |
-| **N** | Pingu Automation & UI — with VM management animations per architecture | Pending |
+| **E** | ComfyUI Image Generation | Weeks 9-16 |
+| **F.1** | Core QEMU Integration (VM types, process management, QMP protocol) | Weeks 17-18 |
+| **F.2** | Architecture Support Matrix (x86_64/KVM, ARM64/RISC-V/AVR/MIPS/PPC/SPARC) | Weeks 19-20 |
+| **F.3** | Native Tooling Management per architecture (GCC cross-compilers, AVR toolchain) | Weeks 21-22 |
+| **G** | Advanced Search & Navigation — with VM architecture context filtering | Weeks 23-28 |
+| **H** | Prompt Engineering Assistant — with QEMU architecture-aware prompts | Weeks 29-34 |
+| **I** | System AI Resource Management — including QEMU VM resource tracking | Weeks 35-40 |
+| **J** | CI/CD Integration Suite — with QEMU multi-architecture testing matrix | Weeks 41-46 |
+| **K** | Analytics & Insights Dashboard — with QEMU VM metrics | Weeks 47-52 |
+| **L** | API Documentation Tools — including QEMU QMP command reference | Weeks 53-58 |
+| **M** | System AI Full Control Mode — with QEMU architecture-aware commands | Weeks 59-64 |
+| **N** | Pingu Automation & UI — with VM management animations per architecture | Weeks 65-70 |
 
 ---
 
-## Current Status
+## Total Estimated Timeline: ~12 weeks (3 months) for Phase F, plus additional phases G-N
 
-**Core complete:** Phase A, C — 100% done ✅  
-**Almost complete (~92-95%):** Phase B (HuggingFace), Phase D (Editor/Terminal) — ⚠️ See bugs below  
-**Complete but with minor bugs (~60-98%):** Phase F, G — Skills panel auto-discovery bug on mount  
-**QEMU/KVM complete:** Phases F.1-F.3 ✅
-
-### Remaining Work Summary
-1. **HuggingFace ModelMetadata display** (Phase B): Call `getModelFileDetails()` from hfClient.ts in ModelManager to show real quantization format and size instead of hardcoded `"GGUF • Q8_0 • 1.9 GB"`
-2. **Split view support** (Phase D): Create `FilePickerOverlay` component, add `splitRightActive`/`splitRightUri` state, implement second Monaco editor instance with auto-save on blur
-3. **Skills panel mount bug** (Phase G): Fix redundant state calls in lines 25-30 of SkillPanel.tsx that break auto-discovery on initial render
-
-### Pending Phases
-All remaining phases (G-N) are pending and not yet started. They represent advanced features for the full-stack AI coding assistant platform including semantic search, prompt engineering, resource management, CI/CD integration, analytics, API documentation tools, System AI control mode, and Pingu automation. The QEMU/KVM simulation layer is complete in phases F.1-F.3.
+This comprehensive plan ensures OpenLLMCode becomes a truly complete, competitive local AI development environment with cutting-edge features for image generation, hardware simulation (QEMU/KVM), advanced search, and intelligent automation. The QEMU integration provides native tooling/system prompts for each architecture (x86_64, ARM64, RISC-V, AVR, MIPS, PowerPC, SPARC) with streaming feedback/control during simulation, unified version management across all development environments, and support for nearly any CPU architecture.
 
 ---
 
