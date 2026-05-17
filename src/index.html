@@ -32,7 +32,10 @@
       process: globalThis.process,
     };
   </script>
-  <script type="module" src="/main.tsx"></script>
+  <!-- Production note: ./main.tsx resolves relative to the HTML file in both dev and prod.
+       In development, Vite serves this via http://localhost:5173/src/main.tsx.
+       In production, it loads from dist/index.html → dist/assets/main-[hash].js after bundling. -->
+  <script type="module" src="./main.tsx"></script>
 </head>
 <body class="m-0 p-0 overflow-hidden bg-[#1e1e2e] text-white font-sans">
   <div id="root"></div>

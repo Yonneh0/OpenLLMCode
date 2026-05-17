@@ -1,13 +1,9 @@
-// Preload script — exposes window.api for React components via contextBridge (contextIsolation: true)
-
 import { ipcRenderer, contextBridge } from 'electron';
 
 export interface AppConfig { backend?: string; binarySource?: string; selectedModel?: string; systemAIModel?: string; hfToken?: string; }
 
-// ─── Exported types for renderer use ──────────────────────────────
-type Callback = (msg: unknown) => void;
+type Callback = (data: unknown) => void;
 
-// ─── API interface namespace — used by Window.api in the global declaration below ──────────────────────────────
 interface Api {
   engine: {
     getConfig: () => Promise<AppConfig>;
@@ -26,8 +22,6 @@ interface Api {
     deleteFile: (filePath: string) => Promise<boolean>;
     searchFiles: (payload: { path: string; regex: string; filePattern?: string }) => Promise<string>;
     glob: (payload: { pattern: string; path?: string }) => Promise<string>;
-    searchFilesIPC: (searchPath: string, regex: string, filePattern?: string) => Promise<string>;
-    globIPC: (pattern: string, baseDir?: string) => Promise<string>;
   };
   terminal: {
     spawn: () => Promise<string>;
@@ -69,98 +63,65 @@ interface Api {
   approval: {
     onApprovalRequest: (callback: Callback) => () => void;
   };
-   engineLogging: {
-     start: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
-     stop: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
-     getLogEntries: (engineId: 'primary' | 'systemAI', includeDisk?: boolean) => Promise<unknown[]>;
-     clearLogEntries: (engineId: 'primary' | 'systemAI') => Promise<void>;
-     getConfig: () => Promise<Record<string, unknown>>;
-     setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => Promise<boolean>;
-     onEngineData: (callback: Callback) => () => void;
-     onLogEntry: (callback: Callback) => () => void;
-   };
-   appShutdown: () => Promise<boolean>;
+  engineLogging: {
+    start: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
+    stop: (engineId: 'primary' | 'systemAI') => Promise<unknown>;
+    getLogEntries: (engineId: 'primary' | 'systemAI', includeDisk?: boolean) => Promise<unknown[]>;
+    clearLogEntries: (engineId: 'primary' | 'systemAI') => Promise<void>;
+    getConfig: () => Promise<Record<string, unknown>>;
+    setConfig: (config: { enableDiskLogging?: boolean; maxMemoryEntriesPerEngine?: number }) => Promise<boolean>;
+    onEngineData: (callback: Callback) => () => void;
+    onLogEntry: (callback: Callback) => () => void;
+  };
+  appShutdown: () => Promise<boolean>;
+  mcp: {
+    getToolNames: () => Promise<string[]>;
+    callTool: (toolName: string, params?: Record<string, unknown>) => Promise<unknown>;
+  };
+  pingu: {
+    downloadGguf: (opts: { url: string; quantization: string; onProgress?: (pct: number) => void }) => 
+      Promise<{ success: boolean; error?: string }>;
+    loadGgufFromFile: (filePath: string, quantMode?: string) => 
+      Promise<{ success: boolean; destPath?: string; error?: string }>;
+    selectGgufFile: () => Promise<string | null>;
+    downloadLlamaCpp: () => 
+      Promise<{ success: boolean; extracted?: string; error?: string }>;
+    installLlamaCppFromZip: (filePath: string) => 
+      Promise<{ success: boolean; extracted?: string; error?: string }>;
+    selectLlamaCppZip: () => Promise<string | null>;
+    getHardwareInfo: () => Promise<{ platform: string; gpu?: string; ramGB: number; hasLlamaCpp: boolean }>;
+  };
+  onGgufProgress: (callback: (data: { percent: number; downloaded: number; total?: number }) => void) => () => void;
+  reloadModel: (opts: { backend: string; gpuLayers?: number; threads?: number; contextWindow?: number }) => 
+    Promise<{ success: boolean; error?: string }>;
+}
 
-   // MCP API — for renderer → main process IPC communication for MCP tools and tool names
-   mcp?: {
-     getToolNames: () => Promise<string[]>;
-     callTool: (toolName: string, params?: Record<string, unknown>) => Promise<unknown>;
-   };
-
-   // ─── Pingu Phase 1-2: Model and binary loading ──────────────────────────────  
-   pingu: {
-     downloadGguf: (opts: { url: string; quantization: string; onProgress?: (pct: number) => void }) => 
-       Promise<{ success: boolean; error?: string }>;
-     loadGgufFromFile: (filePath: string, quantMode?: string) => 
-       Promise<{ success: boolean; destPath?: string; error?: string }>;
-     selectGgufFile: () => Promise<string | null>;
-     
-     downloadLlamaCpp: () => 
-       Promise<{ success: boolean; extracted?: string; error?: string }>;
-     installLlamaCppFromZip: (filePath: string) => 
-       Promise<{ success: boolean; extracted?: string; error?: string }>;
-     selectLlamaCppZip: () => Promise<string | null>;
-     
-     getHardwareInfo: () => Promise<{ platform: string; gpu?: string; ramGB: number; hasLlamaCpp: boolean }>;
-   };
-
-   // ─── Pingu Phase 4: Inference statistics listener ──────────────────────────────  
-   onGgufProgress: (callback: (data: { percent: number; downloaded: number; total?: number }) => void) => () => void;
-
-   // ─── Pingu Phase 6: Model reload via prompt ──────────────────────────────  
-   reloadModel: (opts: { backend: string; gpuLayers?: number; threads?: number; contextWindow?: number }) => 
-     Promise<{ success: boolean; error?: string }>;
- }
-
-// QEMU/KVM Simulation Layer API types — mirrors the IPC handler signatures in preload.ts  
 export interface QemuAPI {
-  // VM lifecycle operations
   create: (config: Record<string, unknown>) => Promise<unknown>;
   start: (vmId: string) => Promise<void>;
   pause: (vmId: string) => Promise<void>;
   resume: (vmId: string) => Promise<void>;
   stop: (vmId: string) => Promise<void>;
   delete: (vmId: string) => Promise<void>;
-
-  // QMP command execution — per the QEMU Machine Protocol Specification chapter  
   monitorSend: (vmId: string, command: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-  // VM listing and disk operations
   listInstances: () => Promise<{ count: number; running: unknown[] }>;
   createDiskImage: (format: string, sizeMB: number, path: string) => Promise<void>;
   convertDiskImage: (srcFormat: string, dstFormat: string, srcPath: string, dstPath: string) => Promise<void>;
   getDiskInfo: (path: string) => Promise<unknown>;
-
-  // Architecture discovery
   getAvailableMachines: (arch: string) => Promise<unknown[]>;
   getAvailableCPUs: (arch: string) => Promise<string[]>;
-
-  // Hotplug operations — per -machine cpu-hotplug and device_add docs  
   hotplugCPU: (vmId: string, socketId: number) => Promise<void>;
   addMemory: (vmId: string, sizeBytes: number) => Promise<void>;
-
-  // Block device query — per QMP "query-block" command  
   queryBlocks: (vmId: string) => Promise<unknown>;
-
-  // Snapshot operations — per qcow2 snapshot support in Disk Images chapter
   createSnapshot: (vmId: string, driveId: string) => Promise<string>;
-
-  // KVM availability check
   checkKVM: () => Promise<boolean>;
-
-  // Get available network backends — per -netdev help docs  
   getNetBackends: () => Promise<string[]>;
-
-  // Output stream subscription
   onQemuOutput: (callback: (data: unknown) => void) => () => void;
-
-  // Toolchain management — per-architecture toolchain download and caching from cross-compile docs  
   listToolchains: () => Promise<unknown[]>;
   ensureToolchain: (arch: string) => Promise<unknown>;
   getProjectToolchains: (projectDir: string) => Promise<Record<string, unknown>>;
 }
 
-// ─── Global window.api augmentation — Api + optional QEMU namespace ──────────────────────────────
 declare global {
   interface Window {
     api: Api & { qemu?: QemuAPI };
@@ -168,15 +129,13 @@ declare global {
 }
 
 // Use contextBridge to expose the API in a contextIsolated world (contextIsolation: true)
-const api: Api & { qemu?: QemuAPI } = {
-  // Engine Manager
+const api: Api & { qemu: QemuAPI } = {
   engine: {
     getConfig: () => ipcRenderer.invoke('engine-get-config') as Promise<AppConfig>,
     setConfig: (cfg: AppConfig) => ipcRenderer.invoke('engine-set-config', cfg),
     detectHardware: () => ipcRenderer.invoke('engine-detect-hardware'),
   },
 
-  // File Operations
   fs: {
     readFile: (filePath: string) => ipcRenderer.invoke('fs-read-file', filePath),
     writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs-write-file', filePath, content),
@@ -191,25 +150,14 @@ const api: Api & { qemu?: QemuAPI } = {
       return () => ipcRenderer.removeListener('file-tree-changed', handler);
     },
 
-    // File search & glob, deletion
     deleteFile: (filePath: string) => ipcRenderer.invoke('fs-delete-file', filePath),
     searchFiles: (payload: { path: string; regex: string; filePattern?: string }) =>
       ipcRenderer.invoke('fs-search-files', payload),
     glob: (payload: { pattern: string; path?: string }) =>
       ipcRenderer.invoke('fs-glob', payload),
 
-    // File tree operations via IPC (for agent tools)
-    searchFilesIPC: async (searchPath: string, regex: string, filePattern?: string): Promise<string> => {
-      const result = await ipcRenderer.invoke('fs-search-files', { path: searchPath, regex, filePattern });
-      return result || '';
-    },
-    globIPC: async (pattern: string, baseDir?: string): Promise<string> => {
-      const result = await ipcRenderer.invoke('fs-glob', { pattern, path: baseDir });
-      return result || '';
-    },
   },
 
-  // Terminal — PTY-based streaming terminal + legacy execCommand
   terminal: {
     spawn: () => ipcRenderer.invoke('terminal-spawn') as Promise<string>,
     write: (sessionId: string, data: string) => ipcRenderer.invoke('terminal-write', sessionId, data),
@@ -222,8 +170,6 @@ const api: Api & { qemu?: QemuAPI } = {
     },
   },
   execCommand: (command: string) => ipcRenderer.invoke('exec-command', command),
-
-  // Git — extended with checkpoint, squash, stash operations
   git: {
     commit: (message: string) => ipcRenderer.invoke('git-commit', message),
     getHeadHash: () => ipcRenderer.invoke('git-get-head-hash'),
@@ -235,7 +181,6 @@ const api: Api & { qemu?: QemuAPI } = {
     hasUncommitted: () => ipcRenderer.invoke('git-has-uncommitted'),
   },
 
-  // Chat / Inference
   chat: {
     start: (payload: Record<string, unknown>) => ipcRenderer.invoke('chat-start', payload),
     sendMessage: (message: string) => ipcRenderer.invoke('chat-send-message', message),
@@ -247,26 +192,22 @@ const api: Api & { qemu?: QemuAPI } = {
     },
   },
 
-  // System AI
   systemAI: {
     start: (modelPath: string) => ipcRenderer.invoke('systemai-start', modelPath),
     sendMessage: (message: string) => ipcRenderer.invoke('systemai-send-message', message),
     stop: () => ipcRenderer.invoke('systemai-stop'),
   },
 
-  // Dialogs
   dialog: {
     selectFolder: (parentWindow?: any) => ipcRenderer.invoke('dialog-select-folder', parentWindow),
     selectFile: (parentWindow?: any) => ipcRenderer.invoke('dialog-select-file', parentWindow),
   },
 
-  // Store config for Electron to read
   electronStore: {
     getConfig: () => ipcRenderer.invoke('electron-store-get-config'),
     setConfig: (key: string, value: unknown) => ipcRenderer.invoke('electron-store-set-config', key, value),
   },
 
-  // Approval events (main → renderer notifications)
   approval: {
     onApprovalRequest: (callback: Callback) => {
       const handler = (_e: unknown, data: unknown) => callback(data);
@@ -275,7 +216,6 @@ const api: Api & { qemu?: QemuAPI } = {
     },
   },
 
-  // Engine logging (real-time monitoring of both engines during reasoning blocks)
   engineLogging: {
     start: (engineId: 'primary' | 'systemAI') => ipcRenderer.invoke('engine-logging-start', engineId),
     stop: (engineId: 'primary' | 'systemAI') => ipcRenderer.invoke('engine-logging-stop', engineId),
@@ -294,109 +234,74 @@ const api: Api & { qemu?: QemuAPI } = {
       return () => ipcRenderer.removeListener('engine-logging-log', handler);
     },
   },
-
-  // App shutdown cleanup
   appShutdown: () => ipcRenderer.invoke('app-shutdown'),
+  mcp: {
+      getToolNames: () => ipcRenderer.invoke('mcp-get-tool-names'),
+      callTool: (toolName: string, params?: Record<string, unknown>) => 
+        ipcRenderer.invoke('mcp-call-tool', toolName, params || {}),
+    },
+  pingu: {
+    downloadGguf: (opts: { url: string; quantization: string }) => 
+      ipcRenderer.invoke('pingu-download-gguf', opts).then((r: any) => ({ success: r.success, error: r.error })),
 
-   // ─── MCP API (renderer → main process) ──────────────────────────────
-   mcp: {
-     getToolNames: () => ipcRenderer.invoke('mcp-get-tool-names'),
-     callTool: (toolName: string, params?: Record<string, unknown>) => 
-       ipcRenderer.invoke('mcp-call-tool', toolName, params || {}),
-   },
+    loadGgufFromFile: (filePath: string, quantMode?: string) =>
+      ipcRenderer.invoke('pingu-load-gguf-file', { filePath, quantization: quantMode })
+        .then((r: any) => ({ success: r.success, destPath: r.destPath || undefined, error: r.error })),
 
-    // ─── Pingu Phase 1-2: Model and binary loading IPC handlers ──────────────────────────────  
-   pingu: {
-     downloadGguf: (opts: { url: string; quantization: string }) => 
-       ipcRenderer.invoke('pingu-download-gguf', opts).then((r: any) => ({ success: r.success, error: r.error })),
+    selectGgufFile: () => ipcRenderer.invoke('pingu-select-gguf-file'),
+    
+    downloadLlamaCpp: () =>
+      ipcRenderer.invoke('pingu-download-llama-cpp').then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
 
-     loadGgufFromFile: (filePath: string, quantMode?: string) =>
-       ipcRenderer.invoke('pingu-load-gguf-file', { filePath, quantization: quantMode })
-         .then((r: any) => ({ success: r.success, destPath: r.destPath || undefined, error: r.error })),
+    installLlamaCppFromZip: (filePath: string) =>
+      ipcRenderer.invoke('pingu-install-llama-cpp-zip', { filePath })
+        .then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
 
-     selectGgufFile: () => ipcRenderer.invoke('pingu-select-gguf-file'),
-     
-     downloadLlamaCpp: () =>
-       ipcRenderer.invoke('pingu-download-llama-cpp').then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
-
-     installLlamaCppFromZip: (filePath: string) =>
-       ipcRenderer.invoke('pingu-install-llama-cpp-zip', { filePath })
-         .then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
-
-     selectLlamaCppZip: () => ipcRenderer.invoke('pingu-select-llama-zip'),
-     
-     getHardwareInfo: () => ipcRenderer.invoke('pingu-get-hardware-info'),
-   },
-
-    // ─── Pingu Phase 4: Inference statistics listener (GGUF progress) — validate data before callback ──────────────────────────────  
-      onGgufProgress: (callback: (data: { percent: number; downloaded: number; total?: number }) => void) => {
-        const handler = (_e: unknown, data: { percent?: number; downloaded?: number; total?: number } | undefined) => {
-          if (!data || typeof data.percent !== 'number' || typeof data.downloaded !== 'number') return; // Validate before callback
-          callback({ percent: data.percent, downloaded: data.downloaded, total: data.total });
-        };
-       ipcRenderer.on('pingu-gguf-progress', handler);
-       return () => ipcRenderer.removeListener('pingu-gguf-progress', handler);
+    selectLlamaCppZip: () => ipcRenderer.invoke('pingu-select-llama-zip'),
+    
+    getHardwareInfo: () => ipcRenderer.invoke('pingu-get-hardware-info'),
+  },
+  onGgufProgress: (callback: (data: { percent: number; downloaded: number; total?: number }) => void) => {
+      const handler = (_e: unknown, data: { percent?: number; downloaded?: number; total?: number } | undefined) => {
+        if (!data || typeof data.percent !== 'number' || typeof data.downloaded !== 'number') return;
+        callback({ percent: data.percent, downloaded: data.downloaded, total: data.total });
+      };
+      ipcRenderer.on('pingu-gguf-progress', handler);
+      return () => ipcRenderer.removeListener('pingu-gguf-progress', handler);
+    },
+  reloadModel: (opts: { backend: string; gpuLayers?: number; threads?: number; contextWindow?: number }) => ipcRenderer.invoke('pingu-reload-model', opts),
+  qemu: {
+      create: (config: Record<string, unknown>) => ipcRenderer.invoke('qemu-vm-create', config),
+      start: (vmId: string) => ipcRenderer.invoke('qemu-vm-start', vmId),
+      pause: (vmId: string) => ipcRenderer.invoke('qemu-vm-pause', vmId),
+      resume: (vmId: string) => ipcRenderer.invoke('qemu-vm-resume', vmId),
+      stop: (vmId: string) => ipcRenderer.invoke('qemu-vm-stop', vmId),
+      delete: (vmId: string) => ipcRenderer.invoke('qemu-vm-delete', vmId),
+      monitorSend: (vmId: string, command: string, args?: Record<string, unknown>) => 
+        ipcRenderer.invoke('qemu-monitor-send', vmId, command, args || {}),
+      listInstances: () => ipcRenderer.invoke('qemu-vm-list'),
+      createDiskImage: (format: string, sizeMB: number, path: string) => 
+        ipcRenderer.invoke('qemu-img-create', format, sizeMB, path),
+      convertDiskImage: (srcFormat: string, dstFormat: string, srcPath: string, dstPath: string) => 
+        ipcRenderer.invoke('qemu-img-convert', srcFormat, dstFormat, srcPath, dstPath),
+      getDiskInfo: (path: string) => ipcRenderer.invoke('qemu-img-info', path),
+      getAvailableMachines: (arch: string) => ipcRenderer.invoke('qemu-get-available-machines', arch),
+      getAvailableCPUs: (arch: string) => ipcRenderer.invoke('qemu-get-available-cpus', arch),
+      hotplugCPU: (vmId: string, socketId: number) => ipcRenderer.invoke('qemu-hotplug-cpu', vmId, socketId),
+      addMemory: (vmId: string, sizeBytes: number) => ipcRenderer.invoke('qemu-add-memory', vmId, sizeBytes),
+      queryBlocks: (vmId: string) => ipcRenderer.invoke('qemu-query-blocks', vmId),
+      createSnapshot: (vmId: string, driveId: string) => ipcRenderer.invoke('qemu-create-snapshot', vmId, driveId),
+      checkKVM: () => ipcRenderer.invoke('qemu-check-kvm-availability'),
+      getNetBackends: () => ipcRenderer.invoke('qemu-get-available-net-backends'),
+      onQemuOutput: (callback: Callback) => {
+        const handler = (_e: unknown, data: unknown) => callback(data);
+        ipcRenderer.on('qemu-output', handler);
+        return () => ipcRenderer.removeListener('qemu-output', handler);
       },
-
-    // ─── Pingu Phase 6: Model reload via prompt — proper typed return ──────────────────────────────  
-     reloadModel: (opts: { backend: string; gpuLayers?: number; threads?: number; contextWindow?: number }) => ipcRenderer.invoke('pingu-reload-model', opts),
-
-    // ─── QEMU/KVM Simulation Layer API ──────────────────────────────  
-   qemu: {
-     // VM lifecycle — per QMP commands from vm-run-state and monitor sections of QMP spec  
-     create: (config: Record<string, unknown>) => ipcRenderer.invoke('qemu-vm-create', config),
-     start: (vmId: string) => ipcRenderer.invoke('qemu-vm-start', vmId),
-     pause: (vmId: string) => ipcRenderer.invoke('qemu-vm-pause', vmId),
-     resume: (vmId: string) => ipcRenderer.invoke('qemu-vm-resume', vmId),
-     stop: (vmId: string) => ipcRenderer.invoke('qemu-vm-stop', vmId),
-     delete: (vmId: string) => ipcRenderer.invoke('qemu-vm-delete', vmId),
-
-     // QMP command execution — per the QEMU Machine Protocol Specification chapter's protocol specification section  
-     monitorSend: (vmId: string, command: string, args?: Record<string, unknown>) => 
-       ipcRenderer.invoke('qemu-monitor-send', vmId, command, args || {}),
-
-     // Get all VM instances — returns copy to prevent mutation from renderer side  
-     listInstances: () => ipcRenderer.invoke('qemu-vm-list'),
-
-     // QEMU-img operations — per the tools/qemu-img docs for disk image management in Tools chapter  
-     createDiskImage: (format: string, sizeMB: number, path: string) => 
-       ipcRenderer.invoke('qemu-img-create', format, sizeMB, path),
-     convertDiskImage: (srcFormat: string, dstFormat: string, srcPath: string, dstPath: string) => 
-       ipcRenderer.invoke('qemu-img-convert', srcFormat, dstFormat, srcPath, dstPath),
-     getDiskInfo: (path: string) => ipcRenderer.invoke('qemu-img-info', path),
-
-     // Architecture discovery helpers — per -machine, -cpu help for each arch from QEMU docs  
-     getAvailableMachines: (arch: string) => ipcRenderer.invoke('qemu-get-available-machines', arch),
-     getAvailableCPUs: (arch: string) => ipcRenderer.invoke('qemu-get-available-cpus', arch),
-
-     // Hotplug operations — per -machine cpu-hotplug and device_add docs  
-     hotplugCPU: (vmId: string, socketId: number) => ipcRenderer.invoke('qemu-hotplug-cpu', vmId, socketId),
-     addMemory: (vmId: string, sizeBytes: number) => ipcRenderer.invoke('qemu-add-memory', vmId, sizeBytes),
-
-     // Block device query — per QMP "query-block" command from block-devices section of QMP spec  
-     queryBlocks: (vmId: string) => ipcRenderer.invoke('qemu-query-blocks', vmId),
-
-     // Snapshot operations — per qcow2 snapshot support in Disk Images chapter and drive-mirror docs  
-     createSnapshot: (vmId: string, driveId: string) => ipcRenderer.invoke('qemu-create-snapshot', vmId, driveId),
-
-     // KVM availability check — per kernel-irqchip and -enable-kvm docs (per /dev/kvm check in QEMU docs)
-     checkKVM: () => ipcRenderer.invoke('qemu-check-kvm-availability'),
-
-     // Get available network backends — per -netdev help docs in Network Devices chapter  
-     getNetBackends: () => ipcRenderer.invoke('qemu-get-available-net-backends'),
-
-     // Output stream subscription — per the VM run state docs, stdout/stderr carry guest OS console output
-     onQemuOutput: (callback: Callback) => {
-       const handler = (_e: unknown, data: unknown) => callback(data);
-       ipcRenderer.on('qemu-output', handler);
-       return () => ipcRenderer.removeListener('qemu-output', handler);
-     },
-
-     // Toolchain management — per-architecture toolchain download and caching from cross-compile docs  
-     listToolchains: () => ipcRenderer.invoke('qemu-toolchain-list'),
-     ensureToolchain: (arch: string) => ipcRenderer.invoke('qemu-toolchain-ensure', arch),
-     getProjectToolchains: (projectDir: string) => ipcRenderer.invoke('qemu-toolchain-project-config', projectDir),
-   },
+      listToolchains: () => ipcRenderer.invoke('qemu-toolchain-list'),
+      ensureToolchain: (arch: string) => ipcRenderer.invoke('qemu-toolchain-ensure', arch),
+      getProjectToolchains: (projectDir: string) => ipcRenderer.invoke('qemu-toolchain-project-config', projectDir),
+    },
 };
 
 // Expose via contextBridge — this is the ONLY way to expose APIs when contextIsolation: true

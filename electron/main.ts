@@ -2,16 +2,59 @@ import * as fs from 'fs';
 import * as pathModule from 'path';
 import { spawn, spawnSync } from 'child_process';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import axios from 'axios';
 import { app, ipcMain, dialog, BrowserWindow } from 'electron';
 
+// Temp files are no longer needed since we use direct HTTP instead of curl.
+// Kept for potential future use with secure naming via createSecureTempFileName().
 const activeTempFiles: string[] = [];
+const PROCESS_TERMINATION_TIMEOUT_MS = 2000;
+// Configurable server ports with environment variable overrides
+const LLM_SERVER_PORT = parseInt(process.env.LLM_SERVER_PORT || '8080', 10);
+const SYSTEM_AI_SERVER_PORT = parseInt(process.env.SYSTEM_AI_SERVER_PORT || '8081', 10);
+const MAX_DIR_TREE_DEPTH = 10;
 
-// Constants — process kill wait timeout (ms)
-const PROCESS_KILL_WAIT_MS = 2000;
+/**
+ * Validate that a resolved file path stays within the allowed base directory.
+ * Throws an error if path traversal is detected.
+ */
+function validatePathWithinBase(baseDir: string, filePath: string): string {
+  const fullPath = pathModule.isAbsolute(filePath) ? filePath : pathModule.join(baseDir, filePath);
+  const resolved = pathModule.resolve(fullPath);
+  const baseResolved = pathModule.resolve(baseDir);
+  
+  // Ensure the resolved path is within the base directory
+  if (!resolved.startsWith(baseResolved + pathModule.sep) && resolved !== baseResolved) {
+    throw new Error(`Path traversal detected: "${filePath}" resolves outside allowed directory`);
+  }
+  
+  return resolved;
+}
+
+/**
+ * Create a secure temporary file name using cryptographic randomness.
+ */
+function createSecureTempFileName(prefix: string, ext: string): string {
+  const randomSuffix = crypto.randomBytes(16).toString('hex');
+  return `${prefix}-${Date.now()}-${randomSuffix}.${ext}`;
+}
+
+/**
+ * Clean up a temp file and remove it from the tracking array.
+ */
+function cleanupTempFile(tmpFile: string): void {
+  const idx = activeTempFiles.indexOf(tmpFile);
+  if (idx !== -1) {
+    activeTempFiles.splice(idx, 1);
+    try { fs.unlinkSync(tmpFile); } catch {}
+  }
+}
+
 import { type ReleaseAsset, detectHardware, downloadBinary, getLatestReleases } from '../src/engine/manager';
 
-let _engineLogger: typeof import('../src/engine/engineLogger') | null = null;
+// Use undefined to mean "not yet attempted", null to mean "permanently failed"
+let _engineLogger: typeof import('../src/engine/engineLogger') | null | undefined = undefined;
 
 function resolveResourcePath(relative: string): string {
   if (!app.isPackaged) return pathModule.join(__dirname, '..', relative);
@@ -23,16 +66,17 @@ let qemuManager: ReturnType<typeof import('../src/engine/qemu/processManager').g
 let toolchainManager: ReturnType<typeof import('../src/engine/qemu/toolchainRegistry').getToolchainRegistry> | null = null;
 
 async function getEngineLogger(): Promise<typeof import('../src/engine/engineLogger')> {
-  if (_engineLogger === null) {
+  // undefined = not yet attempted, null = permanently failed after attempt
+  if (_engineLogger === undefined) {
     const engineLoggerPath = resolveResourcePath(pathModule.posix.join('src', 'engine', 'engineLogger'));
     try {
       _engineLogger = await import(engineLoggerPath);
     } catch (err) {
       console.warn('Engine Logger not available:', err instanceof Error ? err.message : String(err));
-      _engineLogger = null;
+      _engineLogger = null; // Mark as permanently failed so we don't retry indefinitely
     }
   }
-  if (_engineLogger === null) throw new Error('Engine Logger not available');
+  if (_engineLogger === null || _engineLogger === undefined) throw new Error('Engine Logger not available');
   return _engineLogger;
 }
 
@@ -41,7 +85,12 @@ let llamaCppProcess: ReturnType<typeof spawn> | null = null;
 let systemAIProcess: ReturnType<typeof spawn> | null = null;
 let appDataPath = '';
 
-const DATA_DIR: string = process.argv.find((a: string) => a.startsWith('--app-data-dir='))?.split('=')[1] ?? '';
+const DATA_DIR: string = (() => {
+  const arg = process.argv.find((a: string) => a.startsWith('--app-data-dir='));
+  if (!arg) return '';
+  const parts = arg.split('=');
+  return parts.length > 1 && parts[1] !== '' ? parts[1] : '';
+})();
 
 function getPaths() {
   if (!appDataPath) {
@@ -101,8 +150,54 @@ function getProjectRoot(): string {
   return projectRoot;
 }
 
+/**
+ * Find the llama-server binary path in the engines directory.
+ * Returns the full path to the binary, or 'llama-server' as fallback.
+ */
+function resolveServerBinary(enginesDir: string): string {
+  if (fs.existsSync(pathModule.join(enginesDir, 'llama-server'))) {
+    return pathModule.join(enginesDir, 'llama-server');
+  }
+  if (process.platform === 'win32' && fs.existsSync(pathModule.join(enginesDir, 'llama-server.exe'))) {
+    return pathModule.join(enginesDir, 'llama-server.exe');
+  }
+  return 'llama-server';
+}
+
+/**
+ * Send an HTTP POST request directly using Node.js http module.
+ * This replaces the insecure curl-based approach that was vulnerable to shell injection.
+ */
+async function sendHttpPostRequest(port: number, body: Record<string, unknown>, onChunk?: (chunk: string) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const options = {
+      hostname: '127.0.0.1',
+      port,
+      path: '/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+      },
+    };
+
+    const req = require('http').request(options, (res: any) => {
+      res.setEncoding('utf8') as void;
+      res.on('data', (chunk: string) => {
+        if (onChunk) onChunk(chunk);
+      });
+      res.on('end', () => resolve());
+    });
+
+    req.on('error', (err: Error) => reject(err));
+    req.write(data);
+    req.end();
+  });
+}
+
 function readDirTree(dirPath: string, depth = 0): any[] {
-  if (depth > 10) return [];
+  if (depth > MAX_DIR_TREE_DEPTH) return [];
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
     return entries.map((entry: any) => {
@@ -159,28 +254,54 @@ function stopFileWatcher() {
   }
 }
 
-// Track curl processes for cleanup on shutdown
+// No longer needed since we use direct HTTP instead of curl.
+// Kept as empty array for backward compatibility with doCleanup().
 const activeCurlProcesses: ReturnType<typeof spawn>[] = [];
+
+// Module-level terminal sessions map for cleanup on window close
+let terminalSessionsMap: Map<string, TerminalSession> | null = null;
+
+function getTerminalSessions(): Map<string, TerminalSession> {
+  if (!terminalSessionsMap) throw new Error('Terminal sessions not initialized');
+  return terminalSessionsMap;
+}
+
+/** Kill all terminal PTY sessions to prevent orphaned processes */
+function killAllTerminalSessions(): void {
+  if (terminalSessionsMap) {
+    for (const [id, pty] of terminalSessionsMap) {
+      try { pty.kill(); } catch {}
+      terminalSessionsMap.delete(id);
+    }
+  }
+}
 
 function registerIpc() {
   ipcMain.handle('engine-get-config', () => loadConfig());
   ipcMain.handle('engine-set-config', (_e: any, cfg: Record<string, unknown>) => saveConfig({ ...loadConfig(), ...cfg }));
   ipcMain.handle('engine-detect-hardware', () => ({ os: process.platform }));
 
-  // File Operations
   ipcMain.handle('fs-read-file', async (_e: any, filePath: string) => {
-    const fullPath = pathModule.isAbsolute(filePath) ? filePath : pathModule.join(getProjectRoot(), filePath);
-    try { return fs.readFileSync(fullPath, 'utf-8'); }
-    catch { return null; }
+    try {
+      const safePath = validatePathWithinBase(getProjectRoot(), filePath);
+      return fs.readFileSync(safePath, 'utf-8');
+    } catch (err: unknown) {
+      console.warn(`fs-read-file failed for "${filePath}":`, err instanceof Error ? err.message : String(err));
+      return null;
+    }
   });
 
   ipcMain.handle('fs-write-file', async (_e: any, filePath: string, content: string) => {
-    const fullPath = pathModule.isAbsolute(filePath) ? filePath : pathModule.join(getProjectRoot(), filePath);
-    fs.writeFileSync(fullPath, content, 'utf-8');
-    return true;
+    try {
+      const safePath = validatePathWithinBase(getProjectRoot(), filePath);
+      fs.writeFileSync(safePath, content, 'utf-8');
+      return true;
+    } catch (err: unknown) {
+      console.warn(`fs-write-file failed for "${filePath}":`, err instanceof Error ? err.message : String(err));
+      return false;
+    }
   });
 
-  // File Tree Operations
   ipcMain.handle('fs-get-project-root', () => getProjectRoot());
   ipcMain.handle('fs-set-project-root', async (_e: any, rootPath: string) => {
     setProjectRoot(rootPath);
@@ -192,8 +313,8 @@ function registerIpc() {
   ipcMain.handle('fs-start-watcher', () => { startFileWatcher(); return true; });
   ipcMain.handle('fs-stop-watcher', () => { stopFileWatcher(); return true; });
 
-   // PTY Terminal (node-pty)
-   const terminalSessions = new Map<string, TerminalSession>();
+   terminalSessionsMap = new Map<string, TerminalSession>();
+   const terminalSessions = terminalSessionsMap;
 
   ipcMain.handle('terminal-spawn', async () => {
     const ptyModule = await import('node-pty');
@@ -248,7 +369,6 @@ function registerIpc() {
     return true;
   });
 
-  // Terminal — spawn with cwd set to projectRoot so commands run in the user's project directory
   ipcMain.handle('exec-command', async (_e: any, command: string) => {
     const cwd = getProjectRoot();
    if (process.platform === 'win32' || process.env.ELECTRON_RUN_AS_NODE) {
@@ -270,7 +390,6 @@ function registerIpc() {
     }
   });
 
-  // Git — extended with checkpoint, squash, stash operations
   ipcMain.handle('git-commit', async (_e: any, message: string) => {
     const cwd = getProjectRoot();
     if (!cwd) throw new Error('No project root configured');
@@ -291,7 +410,10 @@ function registerIpc() {
     try {
       const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: getProjectRoot(), encoding: 'utf-8' });
       return result.stdout?.trim() || '';
-    } catch { return ''; }
+    } catch (err: unknown) {
+      console.warn('git-get-head-hash failed:', err instanceof Error ? err.message : String(err));
+      return '';
+    }
   });
 
   ipcMain.handle('git-create-checkpoint', async (_e: any, label: string) => {
@@ -301,7 +423,10 @@ function registerIpc() {
       spawnSync('git', ['commit', '-m', `Checkpoint: ${label}`, '--allow-empty'], { cwd });
       const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf-8' });
       return result.stdout?.trim() || '';
-    } catch { return ''; }
+    } catch (err: unknown) {
+      console.warn(`git-create-checkpoint failed for "${label}":`, err instanceof Error ? err.message : String(err));
+      return '';
+    }
   });
 
   ipcMain.handle('git-restore-to-checkpoint', async (_e: any, checkpointHash: string) => {
@@ -309,7 +434,10 @@ function registerIpc() {
     try {
       spawnSync('git', ['reset', '--hard', checkpointHash], { cwd });
       return true;
-    } catch { return false; }
+    } catch (err: unknown) {
+      console.warn(`git-restore-to-checkpoint failed for "${checkpointHash}":`, err instanceof Error ? err.message : String(err));
+      return false;
+    }
   });
 
   ipcMain.handle('git-squash-commits', async (_e: any, commitMessage: string, count = 5) => {
@@ -320,29 +448,26 @@ function registerIpc() {
       spawnSync('git', ['reset', '--soft', baseHash], { cwd });
       spawnSync('git', ['commit', '-m', commitMessage], { cwd });
       return true;
-    } catch { return false; }
+    } catch (err: unknown) {
+      console.warn(`git-squash-commits failed for "${commitMessage}":`, err instanceof Error ? err.message : String(err));
+      return false;
+    }
   });
 
   ipcMain.handle('git-stash', async () => {
     const cwd = getProjectRoot();
     try { spawnSync('git', ['stash', '--include-untracked'], { cwd }); return true; }
-    catch { return false; }
+    catch (err: unknown) {
+      console.warn('git-stash failed:', err instanceof Error ? err.message : String(err));
+      return false;
+    }
   });
 
   ipcMain.handle('git-stash-pop', async () => {
     const cwd = getProjectRoot();
     try { spawnSync('git', ['stash', 'pop'], { cwd }); return true; }
-    catch { return false; }
-  });
-
-  ipcMain.handle('fs-delete-file', async (_e: any, filePath: string) => {
-    const fullPath = pathModule.isAbsolute(filePath) ? filePath : pathModule.join(getProjectRoot(), filePath);
-    try {
-      fs.unlinkSync(fullPath);
-      return true;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`File deletion failed for "${filePath}":`, msg);
+    catch (err: unknown) {
+      console.warn('git-stash-pop failed:', err instanceof Error ? err.message : String(err));
       return false;
     }
   });
@@ -351,31 +476,56 @@ function registerIpc() {
     try {
       const output = spawnSync('git', ['status', '--porcelain'], { cwd: getProjectRoot(), encoding: 'utf-8' }).stdout;
       return (output as string).length > 0;
-    } catch { return false; }
+    } catch (err: unknown) {
+      console.warn('git-has-uncommitted failed:', err instanceof Error ? err.message : String(err));
+      return false;
+    }
   });
+
+  ipcMain.handle('fs-delete-file', async (_e: any, filePath: string) => {
+    try {
+      const safePath = validatePathWithinBase(getProjectRoot(), filePath);
+      fs.unlinkSync(safePath);
+      return true;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`File deletion failed for "${filePath}":`, msg);
+      return false;
+    }
+  });
+
+
 
    ipcMain.handle('fs-search-files', async (_e: any, payload: { path: string; regex: string; filePattern?: string }) => {
      const cwd = getProjectRoot();
-     const searchPath = pathModule.isAbsolute(payload.path) ? payload.path : pathModule.join(cwd, payload.path);
      try {
+       // Validate search path stays within project root to prevent path traversal
+       const safeSearchPath = validatePathWithinBase(cwd, payload.path);
+
        if (process.platform === 'win32') {
-         // Use array-based argument passing for findstr to prevent shell injection
+         // Strip shell metacharacters that could enable injection via cmd.exe
+         const safeRegex = payload.regex.replace(/[|;&$`\\!(){}<>"']/g, '');
+         if (safeRegex.length === 0) return '';
          return spawnSync('cmd.exe', [
-           '/c', 'findstr', '/s', '/n', '/r', payload.regex, `"${searchPath}\\*"`
+           '/c', 'findstr', '/s', '/n', '/r', safeRegex, `"${safeSearchPath}\\*"`
          ], { encoding: 'utf-8', maxBuffer: 1024 * 1024 }).stdout?.trim() || '';
        } else {
-         // Use array-based argument passing for grep to prevent shell injection — no shell interpolation.
          const args = ['-rnE'];
          if (payload.filePattern) {
-           const safeFilePattern = payload.filePattern.replace(/[^a-zA-Z0-9._*?\/\\-]/g, '');
+           // Strip shell metacharacters from file pattern
+           const safeFilePattern = payload.filePattern.replace(/[|;&$`\\!(){}<>"']/g, '');
            if (safeFilePattern.length > 0 && safeFilePattern.length < 256) {
              args.push('--include=' + safeFilePattern);
            }
          }
-         args.push(payload.regex, searchPath);
+         // Strip shell metacharacters from regex
+         const safeRegex = payload.regex.replace(/[|;&$`\\!(){}<>"']/g, '');
+         if (safeRegex.length === 0) return '';
+         args.push(safeRegex, safeSearchPath);
          return spawnSync('grep', args, { cwd, encoding: 'utf-8', maxBuffer: 1024 * 1024 }).stdout?.trim() || '';
        }
-     } catch {
+     } catch (err: unknown) {
+       console.warn('fs-search-files failed:', err instanceof Error ? err.message : String(err));
        return '';
      }
    });
@@ -402,18 +552,30 @@ function registerIpc() {
     }
 
     function simpleGlobMatch(filePath: string, pattern: string): boolean {
-      const regex = new RegExp(
-        '^' + pattern.replace(/\./g, '\\.').replace(/\*\*/g, '___DOUBLESTAR___')
-          .replace(/\*/g, '[^/]*').replace(/___DOUBLESTAR___/g, '.*') + '$',
-        'i'
-      );
-      return regex.test(filePath);
+      let regexStr = '^';
+      let i = 0;
+      while (i < pattern.length) {
+        const ch = pattern[i];
+        if (ch === '*') {
+          if (i + 1 < pattern.length && pattern[i + 1] === '*') {
+            regexStr += '.*';
+            i += 2;
+          } else {
+            regexStr += '[^/]*';
+          }
+        } else if (ch === '.') {
+          regexStr += '\\.';
+        } else {
+          regexStr += ch;
+        }
+        i++;
+      }
+      regexStr += '$';
+      return new RegExp(regexStr, 'i').test(filePath);
     }
   });
 
-  // Chat / Inference — use full path to llama-server binary from engines dir
-  const LlamaServerPort = 8080;
-
+  // Reusable: wait for a TCP server to become ready
   function waitForServer(port: number, maxRetries = 30): Promise<boolean> {
     return new Promise((resolve) => {
       let retries = 0;
@@ -446,9 +608,13 @@ function registerIpc() {
        // Null out first to prevent new events from going to stale reference
          if (llamaCppProcess) {
            const oldProc = llamaCppProcess;
+           // Remove old listeners to prevent memory leaks
+           oldProc.stdout?.removeAllListeners();
+           oldProc.stderr?.removeAllListeners();
+           oldProc.removeAllListeners();
            llamaCppProcess = null;
            try { oldProc.kill('SIGTERM'); } catch (err) { console.error('Failed to kill existing llama-server:', err instanceof Error ? err.message : String(err)); }
-           await new Promise<void>((resolve) => setTimeout(resolve, PROCESS_KILL_WAIT_MS));
+           await new Promise<void>((resolve) => setTimeout(resolve, PROCESS_TERMINATION_TIMEOUT_MS));
            if (!oldProc.killed) {
              try { oldProc.kill('SIGKILL'); } catch (err) { console.error('Failed to SIGKILL existing llama-server:', err instanceof Error ? err.message : String(err)); }
            }
@@ -493,16 +659,24 @@ function registerIpc() {
        serverBinary = pathModule.join(enginesDir, 'llama-server.exe');
      }
 
-     llamaCppProcess = spawn(serverBinary, ['--mlock', '-m', modelPath, '--port', String(LlamaServerPort), '--host', '127.0.0.1'], { env: process.env });
+     llamaCppProcess = spawn(serverBinary, ['--mlock', '-m', modelPath, '--port', String(LLM_SERVER_PORT), '--host', '127.0.0.1'], { env: process.env });
 
     if (llamaCppProcess?.stdout) llamaCppProcess.stdout.on('data', stdoutListener);
      if (llamaCppProcess?.stderr) llamaCppProcess.stderr.on('data', stderrListener);
      llamaCppProcess!.on('exit', exitHandler);
 
+     // Wait for the server to be ready before returning
+     const serverReady = await waitForServer(LLM_SERVER_PORT);
+     if (!serverReady) {
+       // Server didn't start in time — clean up and return error
+       llamaCppProcess.kill('SIGKILL');
+       llamaCppProcess = null;
+       throw new Error('Llama server failed to start within timeout');
+     }
+
       return 'started';
     });
 
-    // Engine Logging — real-time monitoring of both engines during reasoning blocks
     let engineLoggerConfig = { enableDiskLogging: true, maxMemoryEntriesPerEngine: 10000 };
     
     ipcMain.handle('engine-logging-start', async (_e: any, engineId: 'primary' | 'systemAI') => {
@@ -536,70 +710,77 @@ function registerIpc() {
      try { mainWindow?.webContents.send('engine-logging-log', { engineId: event.engineId, level: event.isStderr ? 'warn' : 'trace', message: event.data }); } catch {}
    });
 
-   ipcMain.handle('chat-send-message', async (_e: any, message: string): Promise<'ok' | 'no-engine'> => {
+  ipcMain.handle('chat-send-message', async (_e: any, message: string): Promise<'ok' | 'no-engine'> => {
      if (!llamaCppProcess) return 'no-engine';
       try {
-        const tmpFile = pathModule.join(appDataPath || os.tmpdir(), `llama-request-${Date.now()}-${Math.random().toString(36).slice(2, 9)}.json`);
-        fs.writeFileSync(tmpFile, JSON.stringify({ messages: [{ role: 'user' as const, content: message }], stream: true, temperature: 0.7, top_p: 0.9 }), 'utf-8');
-        
-        activeTempFiles.push(tmpFile);
+        // Use direct HTTP POST instead of curl to eliminate shell injection vulnerability
+        const body = {
+          messages: [{ role: 'user' as const, content: message }],
+          stream: true,
+          temperature: 0.7,
+          top_p: 0.9,
+        };
 
-        const tmpFileArg = process.platform === 'win32' ? `"${tmpFile}"` : `\'${tmpFile}\'`;
-        const curlProc = spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${LlamaServerPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFileArg}`], { env: process.env });
-        activeCurlProcesses.push(curlProc);
+        await sendHttpPostRequest(LLM_SERVER_PORT, body, (chunk) => {
+          try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'primary' as const, data: chunk }); } catch {}
+          const lines = chunk.split('\n').filter(Boolean);
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta?.content) {
+                mainWindow?.webContents.send('chat-response', { type: 'chunk' as const, content: parsed.choices[0].delta.content });
+              } else if (parsed.usage) {
+                mainWindow?.webContents.send('chat-response', { type: 'done' as const, usage: parsed.usage });
+              }
+            } catch {}
+          }
+        });
+
         return 'ok';
-     } catch (err: unknown) { throw err; }
+     } catch (err: unknown) {
+       console.error('chat-send-message failed:', err instanceof Error ? err.message : String(err));
+       try { mainWindow?.webContents.send('chat-error', err instanceof Error ? err.message : String(err)); } catch {}
+       throw err;
+     }
    });
 
    ipcMain.handle('chat-stop', (): boolean => {
      if (!llamaCppProcess) return false;
-     try { llamaCppProcess.kill('SIGTERM'); } catch {}
+     const proc = llamaCppProcess;
+     llamaCppProcess = null;
+     try { proc.kill('SIGTERM'); } catch {}
      setTimeout(() => { 
-       if (llamaCppProcess && !llamaCppProcess.killed) {
-         try { llamaCppProcess.kill('SIGKILL'); } catch {}
+       if (proc && !proc.killed) {
+         try { proc.kill('SIGKILL'); } catch {}
        }
-       llamaCppProcess = null;
-     }, PROCESS_KILL_WAIT_MS);
+     }, PROCESS_TERMINATION_TIMEOUT_MS);
      return true;
    });
 
-   // System AI — use full path to llama-server binary from engines dir
-  const SystemAIPort = 8081;
+   ipcMain.handle('systemai-start', async (_e: any, modelPath: string) => {
+       if (systemAIProcess) {
+         const oldSystemAIProcess = systemAIProcess;
+         await new Promise<void>((resolve) => {
+           try { oldSystemAIProcess.kill('SIGTERM'); } catch { /* ignore */ }
+          setTimeout(() => {
+            if (!oldSystemAIProcess.killed) {
+              try { oldSystemAIProcess.kill('SIGKILL'); } catch { /* ignore */ }
+            }
+            resolve();
+          }, PROCESS_TERMINATION_TIMEOUT_MS);
+        });
+        systemAIProcess = null;
+      }
 
-  ipcMain.handle('systemai-start', async (_e: any, modelPath: string) => {
-      let stdoutListener: (() => void) | undefined;
-      let stderrListener: (() => void) | undefined;
-      let exitHandler: ((code: number, signal: string | null) => void) | undefined;
+      const c = getPaths();
+      const enginesDir = c.ENGINES_DIR;
+      const serverBinary = resolveServerBinary(enginesDir);
 
-      if (systemAIProcess) {
-       await new Promise<void>((resolve) => {
-         try { systemAIProcess!.kill('SIGTERM'); } catch (err) { console.error('Failed to kill existing System AI process:', err instanceof Error ? err.message : String(err)); }
-         setTimeout(() => {
-           if (systemAIProcess && !systemAIProcess.killed) {
-             try { systemAIProcess.kill('SIGKILL'); } catch (err) { console.error('Failed to SIGKILL existing System AI process:', err instanceof Error ? err.message : String(err)); }
-           }
-           resolve();
-         }, PROCESS_KILL_WAIT_MS);
-       });
-       systemAIProcess = null;
-     }
+      systemAIProcess = spawn(serverBinary, ['--mlock', '-m', modelPath, '--port', String(SYSTEM_AI_SERVER_PORT), '--host', '127.0.0.1'], { env: process.env });
 
-     const c = getPaths();
-     const enginesDir = c.ENGINES_DIR;
-     let serverBinary = 'llama-server';
-     if (fs.existsSync(pathModule.join(enginesDir, 'llama-server'))) {
-       serverBinary = pathModule.join(enginesDir, 'llama-server');
-     } else if (process.platform === 'win32' && fs.existsSync(pathModule.join(enginesDir, 'llama-server.exe'))) {
-       serverBinary = pathModule.join(enginesDir, 'llama-server.exe');
-     }
-
-     systemAIProcess = spawn(serverBinary, ['--mlock', '-m', modelPath, '--port', String(SystemAIPort), '--host', '127.0.0.1'], { env: process.env });
-
-  systemAIProcess?.stdout?.on('data', (d: Buffer) => {
-         const output = d.toString();
-
+      systemAIProcess?.stdout?.on('data', (d: Buffer) => {
+        const output = d.toString();
         try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'systemAI' as const, data: output }); } catch {}
-
         for (const line of output.split('\n').filter(Boolean)) {
           try {
             const parsed = JSON.parse(line);
@@ -612,16 +793,24 @@ function registerIpc() {
         }
       });
 
-   systemAIProcess?.stderr?.on('data', (d: Buffer) => {
-       try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'systemAI' as const, data: d.toString(), isStderr: true }); } catch {}
-     });
+      systemAIProcess?.stderr?.on('data', (d: Buffer) => {
+        try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'systemAI' as const, data: d.toString(), isStderr: true }); } catch {}
+      });
 
-  systemAIProcess.on('exit', (code, signal) => {
-       if (!systemAIProcess?.killed) {
-         mainWindow?.webContents.send('systemai-response', { type: 'done' as const });
-       }
-       systemAIProcess = null;
-     });
+      systemAIProcess.on('exit', (code, signal) => {
+        if (!systemAIProcess?.killed) {
+          mainWindow?.webContents.send('systemai-response', { type: 'done' as const });
+        }
+        systemAIProcess = null;
+      });
+
+      // Wait for the server to be ready before returning
+      const serverReady = await waitForServer(SYSTEM_AI_SERVER_PORT);
+      if (!serverReady) {
+        systemAIProcess.kill('SIGKILL');
+        systemAIProcess = null;
+        throw new Error('System AI server failed to start within timeout');
+      }
 
     return true;
  });
@@ -629,27 +818,47 @@ function registerIpc() {
    ipcMain.handle('systemai-send-message', async (_e: any, message: string): Promise<'ok' | 'no-system-ai'> => {
      if (!systemAIProcess) return 'no-system-ai';
        try {
-         const tmpFile = pathModule.join(appDataPath || os.tmpdir(), `systemai-request-${Date.now()}-${Math.random().toString(36).slice(2, 9)}.json`);
-         fs.writeFileSync(tmpFile, JSON.stringify({ messages: [{ role: 'user' as const, content: message }], stream: true, temperature: 0.3, top_p: 0.9 }), 'utf-8');
+         // Use direct HTTP POST instead of curl to eliminate shell injection vulnerability
+         const body = {
+           messages: [{ role: 'user' as const, content: message }],
+           stream: true,
+           temperature: 0.3,
+           top_p: 0.9,
+         };
 
-         activeTempFiles.push(tmpFile);
+         await sendHttpPostRequest(SYSTEM_AI_SERVER_PORT, body, (chunk) => {
+           try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'systemAI' as const, data: chunk }); } catch {}
+           const lines = chunk.split('\n').filter(Boolean);
+           for (const line of lines) {
+             try {
+               const parsed = JSON.parse(line);
+               if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta?.content) {
+                 mainWindow?.webContents.send('systemai-response', { type: 'chunk' as const, content: parsed.choices[0].delta.content });
+               } else if (parsed.usage) {
+                 mainWindow?.webContents.send('systemai-response', { type: 'done' as const, usage: parsed.usage });
+               }
+             } catch {}
+           }
+         });
 
-         const tmpFileArg = process.platform === 'win32' ? `"${tmpFile}"` : `\'${tmpFile}\'`;
-         const curlProc = spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${SystemAIPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFileArg}`], { env: process.env });
-         activeCurlProcesses.push(curlProc);
        return 'ok';
-     } catch (err: unknown) { throw err; }
+     } catch (err: unknown) {
+       console.error('systemai-send-message failed:', err instanceof Error ? err.message : String(err));
+       try { mainWindow?.webContents.send('chat-error', err instanceof Error ? err.message : String(err)); } catch {}
+       throw err;
+     }
    });
 
    ipcMain.handle('systemai-stop', (): boolean => {
      if (!systemAIProcess) return false;
-     try { systemAIProcess.kill('SIGTERM'); } catch {}
+     const proc = systemAIProcess;
+     systemAIProcess = null;
+     try { proc.kill('SIGTERM'); } catch {}
      setTimeout(() => { 
-       if (systemAIProcess && !systemAIProcess.killed) {
-         try { systemAIProcess.kill('SIGKILL'); } catch {}
+       if (proc && !proc.killed) {
+         try { proc.kill('SIGKILL'); } catch {}
        }
-       systemAIProcess = null;
-     }, PROCESS_KILL_WAIT_MS);
+     }, PROCESS_TERMINATION_TIMEOUT_MS);
      return true;
    });
 
@@ -694,9 +903,7 @@ function registerIpc() {
        }
      });
 
-   // QEMU/KVM Simulation Layer IPC handlers
-   
-   async function getQemuManager(): Promise<any> { 
+   async function getQemuManager(): Promise<any> {
      if (!qemuManager) {
        const pm = await import('../src/engine/qemu/processManager');
        qemuManager = pm.getQEMUManager();
@@ -994,16 +1201,15 @@ function registerIpc() {
    ipcMain.handle('pingu-load-gguf-file', async (_e: any, payload: { filePath?: string; quantization?: string }) => {
      const c = getPaths();
      
-     if (payload.filePath) {
-       try {
-         const content = fs.readFileSync(payload.filePath);
-         const destPath = pathModule.join(c.MODELS_DIR, pathModule.basename(payload.filePath));
-         fs.writeFileSync(destPath, content);
-         return { success: true, quantMode: payload.quantization || 'Q8_0' };
-       } catch (err: unknown) {
-         const msg = err instanceof Error ? err.message : String(err);
-         return { success: false, error: `Copy failed: ${msg}` };
-       }
+     if (!payload.filePath) return { success: false, error: 'No file path provided' };
+     try {
+       const content = fs.readFileSync(payload.filePath);
+       const destPath = pathModule.join(c.MODELS_DIR, pathModule.basename(payload.filePath));
+       fs.writeFileSync(destPath, content);
+       return { success: true, quantMode: payload.quantization || 'Q8_0' };
+     } catch (err: unknown) {
+       const msg = err instanceof Error ? err.message : String(err);
+       return { success: false, error: `Copy failed: ${msg}` };
      }
    });
 
@@ -1055,13 +1261,12 @@ function registerIpc() {
 
    ipcMain.handle('pingu-install-llama-cpp-zip', async (_e: any, payload: { filePath?: string }) => {
      const c = getPaths();
+     const destPath = pathModule.join(c.ENGINES_DIR, 'llama-server');
      
-      const destPath = pathModule.join(c.ENGINES_DIR, 'llama-server');
-      try {
-        if (payload.filePath) {
-          fs.writeFileSync(destPath, fs.readFileSync(payload.filePath));
-          return { success: true };
-        }
+     if (!payload.filePath) return { success: false, error: 'No file path provided' };
+     try {
+       fs.writeFileSync(destPath, fs.readFileSync(payload.filePath));
+       return { success: true };
      } catch (err: unknown) {
        const msg = err instanceof Error ? err.message : String(err);
        return { success: false, error: `Installation failed: ${msg}` };
@@ -1080,8 +1285,6 @@ function registerIpc() {
      return result.filePaths[0];
    });
 
-   // Model reload via prompt
-   
    ipcMain.handle('pingu-reload-model', async (_e: any, opts: { backend: string; gpuLayers?: number; threads?: number; contextWindow?: number }) => {
      const c = getPaths();
      
@@ -1093,23 +1296,22 @@ function registerIpc() {
       
      if (llamaCppProcess) {
        const oldProc = llamaCppProcess;
+       // Remove old listeners to prevent memory leaks
+       oldProc.stdout?.removeAllListeners();
+       oldProc.stderr?.removeAllListeners();
+       oldProc.removeAllListeners();
        
        // Null out first to prevent new events from going to stale reference
        llamaCppProcess = null;
        try { oldProc.kill('SIGTERM'); } catch {}
-       await new Promise<void>((resolve) => setTimeout(resolve, PROCESS_KILL_WAIT_MS));
+       await new Promise<void>((resolve) => setTimeout(resolve, PROCESS_TERMINATION_TIMEOUT_MS));
        if (!oldProc.killed) {
          try { oldProc.kill('SIGKILL'); } catch {}
        }
      }
      
      const enginesDir = c.ENGINES_DIR;
-     let serverBinary = 'llama-server';
-     if (fs.existsSync(pathModule.join(enginesDir, 'llama-server'))) {
-       serverBinary = pathModule.join(enginesDir, 'llama-server');
-     } else if (process.platform === 'win32' && fs.existsSync(pathModule.join(enginesDir, 'llama-server.exe'))) {
-       serverBinary = pathModule.join(enginesDir, 'llama-server.exe');
-     }
+     const serverBinary = resolveServerBinary(enginesDir);
      
      const args: string[] = ['--mlock', '-m', modelPath];
      if (opts.contextWindow) args.push('--ctx-size', String(opts.contextWindow));
@@ -1135,7 +1337,6 @@ function registerIpc() {
 
       const stderrListener = (d: Buffer) => {
         try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'primary' as const, data: d.toString(), isStderr: true }); } catch {}
-        mainWindow?.webContents.send('chat-error', d.toString().trim());
       };
 
    if (llamaCppProcess?.stdout) llamaCppProcess.stdout.on('data', stdoutListener);
@@ -1147,6 +1348,8 @@ function registerIpc() {
 
 function doCleanup() {
   stopFileWatcher();
+  // Kill all terminal PTY sessions to prevent orphaned processes
+  killAllTerminalSessions();
 
   for (const proc of [llamaCppProcess, systemAIProcess] as Array<ReturnType<typeof spawn> | null>) {
     if (!proc || proc.killed) continue;
@@ -1155,7 +1358,7 @@ function doCleanup() {
       if (proc && !proc.killed) {
         try { proc.kill('SIGKILL'); } catch {}
       }
-    }, PROCESS_KILL_WAIT_MS);
+    }, PROCESS_TERMINATION_TIMEOUT_MS);
   }
 
   // Kill all tracked curl processes for cleanup on shutdown
@@ -1176,25 +1379,28 @@ function doCleanup() {
 
 ipcMain.handle('app-shutdown', () => { doCleanup(); return true; });
 
-// Unhandled Exception Handler (prevents main process crashes)
+// Log uncaught exceptions to prevent silent crashes
 process.on('uncaughtException', (err: Error) => {
   console.error('Unhandled exception in main process:', err);
 });
 
-// Preload script path resolution — compiled to dist/preload/preload.js by tsconfig.preload.json
 function getPreloadPath(): string {
   if (!app.isPackaged) {
-    // Development: preload is in the source tree
     return pathModule.join(__dirname, '..', 'electron', 'preload.ts');
   }
-  // Production: process.resourcesPath points to the app's resources directory.
-  // The preload must be unpacked (asarUnpack) so Electron can load it from file:// URL.
   const packedPreload = pathModule.join(process.resourcesPath, 'preload.js');
   if (fs.existsSync(packedPreload)) return packedPreload;
-  
-  // Fallback: check dist/preload location when asar is disabled on Windows
+
   const unpackedPreload = pathModule.join(process.resourcesPath, 'dist', 'preload', 'preload.js');
-  return fs.existsSync(unpackedPreload) ? unpackedPreload : packedPreload;
+  if (fs.existsSync(unpackedPreload)) return unpackedPreload;
+
+  const asarFalsePreload = pathModule.join(process.resourcesPath, 'app', 'dist', 'preload', 'preload.js');
+  if (fs.existsSync(asarFalsePreload)) return asarFalsePreload;
+
+  const electronSubdirPreload = pathModule.join(process.resourcesPath, 'app', 'dist', 'electron', 'preload.js');
+  if (fs.existsSync(electronSubdirPreload)) return electronSubdirPreload;
+
+  return packedPreload;
 }
 
 function createMainWindow() {
@@ -1204,12 +1410,12 @@ function createMainWindow() {
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#1e1e2e',
-    webPreferences: { 
-      contextIsolation: true,
-      nodeIntegration: false,
-      webSecurity: true,
-      preload: getPreloadPath(),
-    },
+     webPreferences: { 
+       contextIsolation: true,
+       nodeIntegration: false,
+       webSecurity: true,
+       preload: getPreloadPath(),
+     },
   });
 
   const isDev = process.env.NODE_ENV === 'development';
@@ -1217,10 +1423,25 @@ function createMainWindow() {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
    } else {
-        mainWindow.loadFile(pathModule.join(__dirname, '..', 'index.html'));
+        let indexPath: string | null = null;
+        indexPath = pathModule.join(__dirname, 'dist', 'src', 'index.html');
+        if (!fs.existsSync(indexPath)) {
+          indexPath = pathModule.join(process.resourcesPath, 'app', 'dist', 'src', 'index.html');
+        }
+        if (!fs.existsSync(indexPath)) {
+          indexPath = pathModule.join(__dirname, 'src', 'index.html');
+        }
+        if (!fs.existsSync(indexPath)) {
+          indexPath = pathModule.join(process.resourcesPath, 'app', 'src', 'index.html');
+        }
+        mainWindow.loadFile(indexPath || '');
      }
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  // Clean up terminal sessions when window closes to prevent process orphaning
+  mainWindow.on('closed', () => {
+    killAllTerminalSessions();
+    mainWindow = null;
+  });
 }
 
 function startApp() {

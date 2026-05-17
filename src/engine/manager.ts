@@ -1,4 +1,6 @@
 // Engine Manager — backend selection + GitHub binary download for llama.cpp
+// Note: This file runs in Electron's main process where Node.js modules work natively.
+// Static imports are safe here as Vite does not bundle the main process entry point.
 import axios from 'axios';
 import * as fs from 'fs';
 import * as pathModule from 'path';
@@ -146,8 +148,12 @@ export async function downloadForBackend(backend: Backend): Promise<string> {
     suffixes[backend].some((s) => a.name.toLowerCase().includes(s))
   ) || assets[0];
 
+  // Use the same app data directory as electron/main.ts for consistency
+  const appDataDir = process.platform === 'win32'
+    ? (process.env.APPDATA || '/tmp')
+    : ((process.env.HOME || '/tmp') + '/.openllmcode');
   const destPath = pathModule.join(
-    process.env.APPDATA || '/tmp',
+    appDataDir,
     'OpenLLMCode/engines',
     matched.name
   );

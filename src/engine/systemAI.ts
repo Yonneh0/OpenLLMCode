@@ -1,7 +1,16 @@
 // System AI — 1B CPU model for project management & compilation
-import { spawn, ChildProcess } from 'child_process';
-import * as path from 'path';
-import * as fs from 'fs';
+// Uses dynamic import() instead of require() to avoid Vite bundler issues.
+// Node.js builtins must be accessed via dynamic import in ES modules context.
+
+import type { ChildProcess } from 'child_process';
+
+async function getSpawn(): Promise<typeof import('child_process').spawn> {
+  return (await import('child_process')).spawn;
+}
+
+async function getPath(): Promise<typeof import('path')> {
+  return await import('path');
+}
 
 export class SystemAIClient {
   private process: ChildProcess | null = null;
@@ -9,9 +18,8 @@ export class SystemAIClient {
   private resolved: (() => void)[] = [];
 
   constructor(modelPath?: string) {
-    this.modelPath = modelPath || path.join(
-      process.env.APPDATA || '/tmp', 'OpenLLMCode/models/ibm-grok4-1b.Q8_0.gguf'
-    );
+    const envAppData = typeof process !== 'undefined' && process.env?.APPDATA ? process.env.APPDATA : '';
+    this.modelPath = modelPath || (process.env['APPDATA'] || '/tmp') + '/OpenLLMCode/models/ibm-grok4-1b.Q8_0.gguf';
   }
 
   /**
@@ -69,11 +77,12 @@ DENIED ACTIONS:
   }
 
   async start(): Promise<void> {
-    this.process = spawn('llama-server', [
+   const spawnFn = await getSpawn();
+   this.process = spawnFn('llama-server', [
       '--mlock',
       '-m', this.modelPath,
       '--port', '8081',
-    ], { env: process.env });
+    ], { env: process.env as any });
 
     return new Promise((resolve) => {
       this.resolved.push(resolve);
@@ -184,8 +193,8 @@ export function getInstallCompilerCommand(os: string): string {
 }
 
 // ─── Check if required SDKs are installed ──────────────
-export function checkPrerequisites(os: string): { hasGit: boolean; hasCMake: boolean; hasCompiler: boolean } {
-  const { execSync } = require('child_process');
+export async function checkPrerequisites(os: string): Promise<{ hasGit: boolean; hasCMake: boolean; hasCompiler: boolean }> {
+  const cpModule = await import('child_process');
   return {
     hasGit: true, // assume Git is available
     hasCMake: false,
