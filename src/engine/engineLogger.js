@@ -1,52 +1,6 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.startEngineLogging = startEngineLogging;
-exports.stopEngineLogging = stopEngineLogging;
-exports.getEngineSession = getEngineSession;
-exports.addLogEntry = addLogEntry;
-exports.getEngineLogEntries = getEngineLogEntries;
-exports.clearEngineLogEntries = clearEngineLogEntries;
-exports.filterLogEntries = filterLogEntries;
-exports.getEngineLoggerConfig = getEngineLoggerConfig;
-exports.setEngineLoggerConfig = setEngineLoggerConfig;
-exports.handleEngineStdout = handleEngineStdout;
-exports.handleEngineStderr = handleEngineStderr;
 // Engine Logger — real-time monitoring of llama.cpp instances during reasoning blocks (Phase E)
-const fs = __importStar(require("fs"));
-const pathModule = __importStar(require("path"));
+import * as fs from 'fs';
+import * as pathModule from 'path';
 const DEFAULT_CONFIG = {
     enableDiskLogging: true,
     maxMemoryEntriesPerEngine: 10000,
@@ -59,7 +13,7 @@ let loggerConfig = DEFAULT_CONFIG;
 let sessionIdCounter = Date.now();
 // ─── Session Management ──────────────
 // Start a new logging session for an engine
-function startEngineLogging(engineId, config) {
+export function startEngineLogging(engineId, config) {
     const existing = getEngineSession(engineId);
     // If there's already an active session, stop it first and rotate the log file
     if (existing && existing.isActive) {
@@ -92,7 +46,7 @@ function startEngineLogging(engineId, config) {
     return session;
 }
 // Stop an engine logging session and finalize the log file
-function stopEngineLogging(engineId) {
+export function stopEngineLogging(engineId) {
     const existing = getEngineSession(engineId);
     if (!existing || !existing.isActive) {
         return false; // Already stopped or doesn't exist
@@ -117,14 +71,14 @@ function stopEngineLogging(engineId) {
     return true;
 }
 // Get the current logging session for an engine
-function getEngineSession(engineId) {
+export function getEngineSession(engineId) {
     if (engineId === 'primary')
         return primarySession;
     return systemAISession;
 }
 // ─── Log Entry Management ──────────────
 // Add a log entry to an engine's session
-function addLogEntry(engineId, level, message) {
+export function addLogEntry(engineId, level, message) {
     const session = getEngineSession(engineId);
     if (!session) {
         // No active session — return entry anyway for potential UI display (ephemeral logging)
@@ -164,7 +118,7 @@ function addLogEntry(engineId, level, message) {
     return entry;
 }
 // Get all log entries for an engine (memory + optionally disk)
-function getEngineLogEntries(engineId, includeDisk = false) {
+export function getEngineLogEntries(engineId, includeDisk = false) {
     const session = getEngineSession(engineId);
     if (!session)
         return [];
@@ -192,7 +146,7 @@ function getEngineLogEntries(engineId, includeDisk = false) {
     return [...session.logEntries, ...diskEntries];
 }
 // Clear the log entries for an engine (without stopping the session)
-function clearEngineLogEntries(engineId) {
+export function clearEngineLogEntries(engineId) {
     const session = getEngineSession(engineId);
     if (!session || !session.isActive)
         return false;
@@ -213,7 +167,7 @@ const LEVEL_ORDER = {
     warn: 3,
     error: 4,
 };
-function filterLogEntries(engineId, options) {
+export function filterLogEntries(engineId, options) {
     const entries = getEngineLogEntries(engineId);
     return entries.filter(entry => {
         // Filter by source if specified
@@ -257,10 +211,10 @@ function rotateLogFileIfNecessary(logFilePath) {
     catch { } // Ignore rotation errors silently
 }
 // ─── Configuration ──────────────
-function getEngineLoggerConfig() {
+export function getEngineLoggerConfig() {
     return { ...loggerConfig };
 }
-function setEngineLoggerConfig(config) {
+export function setEngineLoggerConfig(config) {
     loggerConfig = { ...loggerConfig, ...config };
     // Update existing session's max entries if changed
     const needsPrimaryUpdate = config.maxMemoryEntriesPerEngine !== undefined;
@@ -279,7 +233,7 @@ function getAppDataDir() {
 }
 // ─── IPC Event Handlers (called from main process when engine outputs) ──────────────
 // Called by the Electron main process when a llama.cpp instance writes to stdout/stderr
-function handleEngineStdout(engineId, data) {
+export function handleEngineStdout(engineId, data) {
     try {
         // Try to parse as JSON (llama-server streaming output)
         const lines = data.split('\n').filter(Boolean);
@@ -310,7 +264,7 @@ function handleEngineStdout(engineId, data) {
     catch { } // Silently ignore parsing errors
 }
 // Called by the Electron main process when a llama.cpp instance writes to stderr
-function handleEngineStderr(engineId, data) {
+export function handleEngineStderr(engineId, data) {
     try {
         const trimmed = data.toString().trim();
         if (trimmed) {

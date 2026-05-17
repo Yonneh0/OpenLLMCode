@@ -106,7 +106,8 @@ export async function connectServer(config: MCPServerConfig): Promise<MCPServer>
         command: config.command,
         args: config.args || [],
         env: (config.env !== undefined) ? Object.fromEntries(
-          Object.entries({ ...process.env, ...config.env }).filter(([_, v]) => v != null)
+          // Bug #11 fix — filter out null/undefined AND non-string values to prevent Node.js env rejection
+          Object.entries({ ...process.env, ...config.env }).filter(([_, v]) => v != null && typeof v === 'string')
         ) as Record<string, string> : undefined,
       });
 

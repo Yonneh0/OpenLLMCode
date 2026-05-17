@@ -1,52 +1,13 @@
-"use strict";
 // ─── Core QEMU Process Lifecycle Management ──────────────────────────────
 // Following exact same pattern as existing llama.cpp/System AI process spawning in main.ts,
 // plus additional QMP (QEMU Machine Protocol) connectivity for remote monitor interactions.
 // Based on research of QEMU's current API docs at https://www.qemu.org/docs/master/
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.QEMUProcessManager = void 0;
-exports.getQEMUManager = getQEMUManager;
-const net = __importStar(require("net")); // For TCP QMP connections — per qmp-spec protocol specification  
-const child_process_1 = require("child_process");
+import * as net from 'net'; // For TCP QMP connections — per qmp-spec protocol specification  
+import { spawn } from 'child_process';
 // Base port for TCP-based QMP connections (one per VM) — per QMP tcp docs
 const QMP_PORT_BASE = 9100;
-class QEMUProcessManager {
-    constructor() {
-        this.instances = new Map();
-    }
+export class QEMUProcessManager {
+    instances = new Map();
     // ─── Build the command-line arguments for a given architecture ──────────────────────────────
     // Per -machine, -cpu, -smp flags in docs
     buildArgs(config) {
@@ -223,7 +184,7 @@ class QEMUProcessManager {
         const args = this.buildArgs(config);
         const arch = config.architecture;
         // Spawn QEMU process — same pattern as your existing llama.cpp/System AI spawning in main.ts
-        const proc = (0, child_process_1.spawn)('qemu-system-' + arch.replace('64', '').replace('32', ''), // e.g., "qemu-system-x86_64" per arch docs  
+        const proc = spawn('qemu-system-' + arch.replace('64', '').replace('32', ''), // e.g., "qemu-system-x86_64" per arch docs  
         args, { env: process.env });
         const instance = {
             id: config.id,
@@ -342,7 +303,7 @@ class QEMUProcessManager {
             if (vm.process && !vm.process.killed)
                 vm.process.kill('SIGKILL');
         }, 3000);
-        vm.state = 'shutdown-request'; // Closest valid state — "stopped" not in VM_RUN_STATE enum (use shutdown-request per QMP spec)
+        vm.state = 'shuttingdown'; // Use enum value from VM_RUN_STATE — "stopped" is deprecated since QEMU 5.0 (per QMP docs)
     }
     async deleteVM(vmId) {
         const vm = this.instances.get(vmId);
@@ -393,7 +354,7 @@ class QEMUProcessManager {
     // ─── Architecture Discovery Helpers ──────────────────────────────
     async getAvailableMachines(arch) {
         // This is architecture-specific and requires spawning a temporary VM with -machine help (per -machine docs)
-        const proc = (0, child_process_1.spawn)('qemu-system-' + arch.replace('64', '').replace('32', ''), ['-machine', 'help']); // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
+        const proc = spawn('qemu-system-' + arch.replace(/64|32/g, ''), ['-machine', 'help']); // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
         return new Promise((resolve) => {
             let output = '';
             proc.stdout?.on('data', (d) => { output += d.toString(); }); // Parse -machine help output (per machine types docs)  
@@ -427,7 +388,7 @@ class QEMUProcessManager {
     }
     // ─── Architecture Query Helpers ──────────────────────────────
     async getAvailableCPUs(arch) {
-        const proc = (0, child_process_1.spawn)('qemu-system-' + arch.replace('64', '').replace('32', ''), ['-cpu', 'help']); // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
+        const proc = spawn('qemu-system-' + arch.replace(/64|32/g, ''), ['-cpu', 'help']); // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
         return new Promise((resolve) => {
             let output = '';
             proc.stdout?.on('data', (d) => { output += d.toString(); }); // Parse -cpu help — lists CPU models per arch  
@@ -441,7 +402,7 @@ class QEMUProcessManager {
         return !result.stderr.includes('Permission denied') && !result.stdout.includes('No such file or directory');
     }
     async getAvailableNetBackends() {
-        const proc = (0, child_process_1.spawn)('qemu-system-x86_64', ['-netdev', 'help']); // Query via x86 (all archs share same net backend types) — eslint-disable-line @typescript-eslint/no-explicit-any
+        const proc = spawn('qemu-system-x86_64', ['-netdev', 'help']); // Query via x86 (all archs share same net backend types)
         return new Promise((resolve) => {
             let output = '';
             proc.stdout?.on('data', (d) => { output += d.toString(); }); // Parse -netdev help — lists all available backends  
@@ -478,7 +439,7 @@ class QEMUProcessManager {
     }
     executeCommand(cmd) {
         return new Promise((resolve) => {
-            const proc = (0, child_process_1.spawn)('cmd.exe', ['/c', cmd], { env: process.env }); // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
+            const proc = spawn('cmd.exe', ['/c', cmd], { env: process.env }); // eslint-disable-line @typescript-eslint/no-explicit-any — Windows-specific command execution
             let stdout = '', stderr = '';
             proc.stdout?.on('data', (d) => { stdout += d.toString(); }); // Capture output per standard child_process docs  
             proc.stderr?.on('data', (d) => { stderr += d.toString(); });
@@ -486,10 +447,9 @@ class QEMUProcessManager {
         });
     }
 }
-exports.QEMUProcessManager = QEMUProcessManager;
 // ─── Singleton Export ──────────────────────────────
 let _instance = null;
-function getQEMUManager() {
+export function getQEMUManager() {
     if (!_instance)
         _instance = new QEMUProcessManager();
     return _instance;

@@ -7,7 +7,7 @@ import { usePinguStore } from '../store/pinguStore';
 interface ModelRecommendation {
   name: string;
   url: string;
-  sizeMB: number;
+  sizeMB: number; // Q8_0 size for reference
   quantization: string;
   minVRAM: number; // MB required on GPU for optimal performance
   minRAM: number; // MB required on RAM for CPU-only inference
@@ -50,6 +50,9 @@ export function NoModelDialog({ onClose }: { onClose: () => void }) {
   const setHasGguf = usePinguStore(s => s.setHasGguf);
   const setHasLlamaCpp = usePinguStore(s => s.setHasLlamaCpp);
   
+  // Helper to call pingu IPC — uses window.pingu (not window.electron)
+  const pinguAPI = typeof window !== 'undefined' ? (window as any).pingu : null;
+  
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       {/* Backdrop — click to close */}
@@ -63,16 +66,17 @@ export function NoModelDialog({ onClose }: { onClose: () => void }) {
         {/* Content */}
         <div className="p-4 space-y-5">
           {/* Hardware status section */}
-          <HardwareStatusSection />
+          <HardwareStatusSection pinguAPI={pinguAPI} />
           
           {/* Model recommendation section (includes both GGUF + llama.cpp) */}
           <ModelRecommendationSection 
             setHasGguf={setHasGguf}
             setHasLlamaCpp={setHasLlamaCpp}
+            pinguAPI={pinguAPI}
           />
           
           {/* Drag-and-drop zone for GGUF files */}
-          <DragDropGgufSection onFileDropped={() => {}} />
+          <DragDropGgufSection pinguAPI={pinguAPI} onFileDropped={() => {}} />
         </div>
         
         {/* Footer — close button */}
@@ -94,7 +98,7 @@ export function NoModelDialog({ onClose }: { onClose: () => void }) {
 function NoModelDialogHeader() {
   return (
     <div className="px-4 py-3 border-b border-[#45475a] flex items-center gap-3">
-      {/* Dangling Pingu icon */}
+      {/* Pingu dangling — lifeless */}
       <svg width="36" height="40" viewBox="0 0 36 40" className="flex-shrink-0">
         <ellipse cx="18" cy="37" rx="12" ry="3.5" fill="#F9E2AF"/>
         <circle cx="18" cy="24" r="13" fill="#8B5E3C">
@@ -130,18 +134,25 @@ function NoModelDialogHeader() {
 
 // ─── Hardware Status Section ──────────────
 
-function HardwareStatusSection() {
+interface HardwareStatusSectionProps {
+  pinguAPI: typeof window.pingu | null;
+}
+
+function HardwareStatusSection({ pinguAPI }: HardwareStatusSectionProps) {
   const [hardware, setHardware] = useState<{
     platform: string;
     gpu?: string;
     ramGB: number;
+    hasLlamaCpp?: boolean;
   } | null>(null);
   
   useEffect(() => {
-    window.electron?.getHardwareInfo().then((info: any) => {
+    pinguAPI?.getHardwareInfo().then((info: any) => {
       if (info) setHardware(info);
+      // Also cache for other components to use
+      (window as any).pinguHardware = info;
     });
-  }, []);
+  }, [pinguAPI]);
   
   return (
     <div className="rounded-lg border border-[#45475a] p-3">
@@ -177,17 +188,18 @@ function HardwareStatusSection() {
           </div>
           
           <div>
-            <span className="text-[#a6adc8] opacity-50 block mb-0.5">GPU VRAM (estimated)</span>
-            {hardware.gpu ? (
-              <span className="text-cyan-300">{Math.round(hardware.ramGB * 0.125)} GB estimated</span>
+            <span className="text-[#a6adc8] opacity-50 block mb-0.5">llama.cpp binary</span>
+            {hardware.hasLlamaCpp ? (
+              <span className="text-green-300">✓ Detected</span>
             ) : (
-              <span className="text-[#a6adc8] opacity-50">N/A — CPU only</span>
+              <span className="text-orange-400">Not detected — download below</span>
             )}
           </div>
         </div>
       ) : (
         <div className="flex items-center gap-2 text-xs text-[#a6adc8] opacity-70">
-          <span className="animate-pulse-slow">●</span> Detecting hardware...
+          <span className="animate-pulse-slow">●</span>
+          Detecting hardware...
         </div>
       )}
       
@@ -205,9 +217,14 @@ function HardwareStatusSection() {
 interface ModelRecommendationSectionProps {
   setHasGguf: (has: boolean) => void;
   setHasLlamaCpp: (has: boolean) => void;
+  pinguAPI: typeof window.pingu | null;
 }
 
-function ModelRecommendationSection({ setHasGguf, setHasLlamaCpp }: ModelRecommendationSectionProps) {
+function ModelRecommendationSection({ setHasGguf, setHasLlamaCpp, pinguAPI }: ModelRecommendationSectionProps) {
+  // Check if llama.cpp binary already exists before suggesting GPU acceleration
+  const hasLlamaCpp = typeof window !== 'undefined' && 
+    (window as any).pinguHardware?.hasLlamaCpp;
+  
   return (
     <div className="rounded-lg border border-[#45475a] p-3">
       {/* Title */}
@@ -215,22 +232,12 @@ function ModelRecommendationSection({ setHasGguf, setHasLlamaCpp }: ModelRecomme
         📦 Recommended Models & Binary
       </h3>
       
-      {/* Hardware-aware recommendation banner */}
-      {(() => {
-        const hasGPU = typeof window !== 'undefined' && 
-          (window as any).pinguHardware?.gpu;
-        
-        if (!hasGPU) return null;
-        
+      {/* Hardware-aware recommendation banner — only show if llama.cpp is present */}
+      {hasLlamaCpp && (() => {
+        const hasGPU = (window as any).pinguHardware?.gpu;
         return (
-          <div className={`mb-3 rounded border px-3 py-2 text-xs ${
-            hasGPU.toLowerCase().includes('nvidia') ? 'bg-green-900/15 border-green-700/40 text-green-300' :
-            hasGPU.includes('Apple') ? 'bg-yellow-900/15 border-yellow-700/40 text-yellow-300' :
-            'bg-cyan-900/15 border-cyan-700/40 text-cyan-300'
-          }`}>
-            💡 Based on your {hasGPU} GPU — these models will be WAY faster with GPU acceleration!
-            <br />
-            Larger models may not fit in VRAM and could fall back to CPU.
+          <div className="mb-3 rounded border px-3 py-2 text-xs bg-green-900/15 border-green-700/40 text-green-300">
+            💡 With llama.cpp binary and your {hasGPU} GPU — these models will be WAY faster with GPU acceleration!
           </div>
         );
       })()}
@@ -241,6 +248,7 @@ function ModelRecommendationSection({ setHasGguf, setHasLlamaCpp }: ModelRecomme
           <ModelCard 
             key={model.name}
             model={model}
+            pinguAPI={pinguAPI}
             onDownload={() => setHasGguf(true)}
           />
         ))}
@@ -250,9 +258,7 @@ function ModelRecommendationSection({ setHasGguf, setHasLlamaCpp }: ModelRecomme
       <div className="border-t border-[#45475a] my-3" />
       
       {/* llama.cpp binary download */}
-      <LlamaCppBinaryDownload 
-        onDone={() => setHasLlamaCpp(true)}
-      />
+      <LlamaCppBinaryDownload pinguAPI={pinguAPI} onDone={() => setHasLlamaCpp(true)} />
     </div>
   );
 }
@@ -261,10 +267,11 @@ function ModelRecommendationSection({ setHasGguf, setHasLlamaCpp }: ModelRecomme
 
 interface ModelCardProps {
   model: ModelRecommendation;
+  pinguAPI: typeof window.pingu | null;
   onDownload: () => void;
 }
 
-function ModelCard({ model, onDownload }: ModelCardProps) {
+function ModelCard({ model, pinguAPI, onDownload }: ModelCardProps) {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   
@@ -275,7 +282,7 @@ function ModelCard({ model, onDownload }: ModelCardProps) {
     setDownloading(true);
     
     try {
-      const result = await (window as any).electron?.downloadGguf({
+      const result = await pinguAPI?.downloadGguf({
         url: model.url,
         quantization: quantMode,
         onProgress: (pct: number) => setProgress(pct),
@@ -352,10 +359,11 @@ function ModelCard({ model, onDownload }: ModelCardProps) {
 // ─── llama.cpp Binary Download (inline section) ──────────────
 
 interface LlamaCppBinaryDownloadProps {
+  pinguAPI: typeof window.pingu | null;
   onDone: () => void;
 }
 
-function LlamaCppBinaryDownload({ onDone }: LlamaCppBinaryDownloadProps) {
+function LlamaCppBinaryDownload({ pinguAPI, onDone }: LlamaCppBinaryDownloadProps) {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   
@@ -363,7 +371,7 @@ function LlamaCppBinaryDownload({ onDone }: LlamaCppBinaryDownloadProps) {
     setDownloading(true);
     
     try {
-      const result = await (window as any).electron?.downloadLlamaCpp({
+      const result = await pinguAPI?.downloadLlamaCpp({
         onProgress: (pct: number) => setProgress(pct),
       });
       
@@ -407,7 +415,10 @@ function LlamaCppBinaryDownload({ onDone }: LlamaCppBinaryDownloadProps) {
 
 // ─── Drag-and-Drop .zip Section (for GGUF files) ──────────────
 
-function DragDropGgufSection({ onFileDropped }: { onFileDropped: (path: string, quantMode: string) => void }) {
+function DragDropGgufSection({ pinguAPI, onFileDropped }: { 
+  pinguAPI: typeof window.pingu | null;
+  onFileDropped: (path: string, quantMode: string) => void 
+}) {
   const [isDragging, setIsDragging] = useState(false);
   
   return (
@@ -423,29 +434,31 @@ function DragDropGgufSection({ onFileDropped }: { onFileDropped: (path: string, 
         }`}
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
-        onDrop={(e) => {
+        onDrop={async (e) => {
           e.preventDefault();
           setIsDragging(false);
           
           const file = e.dataTransfer.files[0];
           if (file && file.name.endsWith('.gguf')) {
             // Copy to models/ via IPC, prompt for quantization selection
-            window.electron?.loadGgufFromFile(file.path).then((result: any) => {
-              onFileDropped(file.path, result.quantMode);
-            });
+            const result = await pinguAPI?.loadGgufFromFile(file as unknown as File);
+            if (result?.success) onFileDropped(file.name, result.quantMode);
           }
         }}
       >
         <span className="text-lg">📁</span>
         <p className="text-xs text-[#a6adc8] opacity-70 mt-1">Drop a .gguf file here</p>
-        <button 
-          onClick={() => window.electron?.selectGgufFile().then((path: string) => {
-            if (path) onFileDropped(path, 'Q8_0'); // Default to Q8_0 for file browser
-          })}
-          className="mt-2 px-3 py-1 rounded text-xs bg-[#313244] hover:bg-[#45475a] transition"
-        >
-          Browse files...
-        </button>
+        {pinguAPI && (
+          <button 
+            onClick={async () => {
+              const path = await pinguAPI.selectGgufFile();
+              if (path) onFileDropped(path, 'Q8_0'); // Default to Q8_0 for file browser
+            }}
+            className="mt-2 px-3 py-1 rounded text-xs bg-[#313244] hover:bg-[#45475a] transition"
+          >
+            Browse files...
+          </button>
+        )}
       </div>
     </div>
   );

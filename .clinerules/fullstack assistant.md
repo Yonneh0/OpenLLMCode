@@ -34,8 +34,9 @@ When presenting a fix:
 
 ### TypeScript Fixes Only (safe to verify without Electron rebuild)
 When fixing only TypeScript compilation issues, you MAY claim completion AFTER verifying:
-1. `npm tsc --noEmit` passes with zero errors ✓
-2. No new ESLint or type-checking warnings introduced ✓
+1. `npx tsc --noEmit` passes with zero errors ✓
+2. `npx tsc -p tsconfig.electron.json --noEmit 2>&1` passes with zero errors ✓
+3. No new ESLint or type-checking warnings introduced ✓
 
 ### Full Build Verification Required
 When the task includes "project passes npm run build && npm run electron:build", you MUST verify BOTH:

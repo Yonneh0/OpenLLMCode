@@ -1,89 +1,107 @@
-"use strict";
 // ─── Per-Architecture Toolchain Registry ──────────────────────────────
 // Manages per-architecture toolchain download, caching, and project-specific selection
 // Based on cross-compile environment variable patterns in each architecture's -cpu and -device sections
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
+import * as fs from 'fs';
+import * as pathModule from 'path';
+import axios from 'axios';
+async function downloadAndExtract(archiveInfo, destDir) {
+    const response = await axios.get(archiveInfo.url, {
+        responseType: 'arraybuffer',
+        timeout: 10 * 60 * 1000 // 10 minute timeout for large toolchains
+    });
+    // Create destination directory if it doesn't exist
+    fs.mkdirSync(destDir, { recursive: true });
+    const dataBuffer = Buffer.from(response.data);
+    // Detect archive type from URL extension and extract accordingly
+    const urlPath = archiveInfo.url.toLowerCase();
+    if (urlPath.endsWith('.tar.gz') || urlPath.endsWith('.tgz')) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any — zlib types for Node.js stream APIs
+        const zlib = require('zlib'); // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic require for optional dependency (Node.js built-in)
+        zlib.gunzip(dataBuffer, (err, decompressed) => {
+            if (err)
+                throw err;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any — tar-fs types for Node.js stream APIs
+            const tar = require('tar-fs'); // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic require for optional dependency (Node.js built-in)
+            const extract = tar.extract(destDir);
+            extract.on('finish', () => { }); // Extract complete
+            extract.on('error', (e) => { throw e; });
+            extract.write(decompressed);
+            extract.end();
+        });
     }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
+    else if (urlPath.endsWith('.zip')) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any — unzip-stream types for Node.js stream APIs
+        const unzip = require('unzip-stream'); // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic require for optional dependency (Node.js built-in)
+        await new Promise((resolve, reject) => {
+            unzip.Extract({ path: destDir }).on('finish', () => resolve()).catch(reject);
+            const stream = fs.createWriteStream('/tmp/toolchain-tmp.zip');
+            stream.on('finish', () => {
+                fs.createReadStream('/tmp/toolchain-tmp.zip').pipe(unzip.Extract({ path: destDir }));
+            });
+        });
+    }
+    else {
+        // Unknown format — write raw data (likely a single binary)
+        fs.writeFileSync(pathModule.join(destDir, pathModule.basename(urlPath)), dataBuffer);
+    }
+}
+// ─── Toolchain Extraction Helper — Per-Architecture ──────────────────────────────
+// Each architecture's toolchain has a specific archive URL.
+const TOOLCHAIN_ARCHIVES = {
+    x86_64: { url: 'https://github.com/xPack-dev-tools/gcc-x86-64/releases/download/v13.2.0-1/xpack-gcc-x86-64-13.2.0-1.tar.gz' },
+    i386: { url: 'https://github.com/xPack-dev-tools/gcc-x86-64/releases/download/v13.2.0-1/xpack-gcc-x86-64-13.2.0-1.tar.gz' }, // Reuse x86_64
+    aarch64: { url: 'https://github.com/xPack-dev-tools/aarch64-none-elf-gcc/releases/download/v13.2.0-1/xpack-aarch64-none-elf-gcc-13.2.0-1.tar.gz' },
+    armv7l: { url: 'https://github.com/xPack-dev-tools/arm-none-eabi-gcc/releases/download/v15.2.0-1/xpack-arm-none-eabi-gcc-15.2.0-1.tar.gz' },
+    riscv64: { url: 'https://github.com/riscv-collab/riscv64-gcc-gnu/releases/download/riscv64-newlib-13.2.0/riscv64-gcc-nolibc-linux-x86_64.tar.gz' },
+    riscv32: { url: 'https://github.com/riscv-collab/riscv64-gcc-gnu/releases/download/riscv64-newlib-13.2.0/riscv64-gcc-nolibc-linux-x86_64.tar.gz' }, // Reuse RISC-V 64-bit
+    avr: { url: 'https://github.com/xPack-dev-tools/avr-gcc-xpack/releases/download/v13.2.0-1/xpack-avr-gcc-13.2.0-1.tar.gz' },
+    mips: { url: 'https://github.com/xPack-dev-tools/mips-elf-gcc/releases/download/v13.2.0-1/xpack-mips-elf-gcc-13.2.0-1.tar.gz' },
+    mips64: { url: 'https://github.com/xPack-dev-tools/mips-elf-gcc/releases/download/v13.2.0-1/xpack-mips-elf-gcc-13.2.0-1.tar.gz' }, // Reuse MIPS
+    mipsel: { url: 'https://github.com/xPack-dev-tools/mips-elf-gcc/releases/download/v13.2.0-1/xpack-mips-elf-gcc-13.2.0-1.tar.gz' }, // Reuse MIPS
+    mips64el: { url: 'https://github.com/xPack-dev-tools/mips-elf-gcc/releases/download/v13.2.0-1/xpack-mips-elf-gcc-13.2.0-1.tar.gz' }, // Reuse MIPS
+    ppc: { url: 'https://github.com/xPack-dev-tools/powerpc-unknown-elf-gcc/releases/download/v13.2.0-1/xpack-powerpc-unknown-elf-gcc-13.2.0-1.tar.gz' },
+    ppc64: { url: 'https://github.com/xPack-dev-tools/powerpc-unknown-linux-gnu-gcc/releases/download/v13.2.0-1/xpack-powerpc-unknown-linux-gnu-gcc-13.2.0-1.tar.gz' },
+    ppcemb: { url: 'https://github.com/xPack-dev-tools/powerpc-e500v2-gcc/releases/download/v13.2.0-1/xpack-powerpc-e500v2-gcc-13.2.0-1.tar.gz' },
+    sparc: { url: 'https://github.com/xPack-dev-tools/sparc-unknown-linux-gnu-gcc/releases/download/v13.2.0-1/xpack-sparc-unknown-linux-gnu-gcc-13.2.0-1.tar.gz' },
+    sparc64: { url: 'https://github.com/xPack-dev-tools/sparc64-unknown-linux-gnu-gcc/releases/download/v13.2.0-1/xpack-sparc64-unknown-linux-gnu-gcc-13.2.0-1.tar.gz' },
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.getToolchainRegistry = getToolchainRegistry;
-const fs = __importStar(require("fs"));
-const pathModule = __importStar(require("path"));
-const axios_1 = __importDefault(require("axios"));
-// ─── Architecture-Specific Toolchain Definitions ──────────────────────────────
-// Derived from cross-compile env vars in the system docs for each arch
+// ─── Architecture-Specific Post-Extraction Actions ──────────────────────────────
+function postExtractSetup(arch, targetDir) {
+    // Per architecture's -cpu and cross-compile docs — set up symlinks for expected binary names
+    if (arch === 'avr') {
+        const binDir = pathModule.join(targetDir, 'bin');
+        try {
+            if (!fs.existsSync(pathModule.join(binDir, 'avr-gcc'))) {
+                // Create avr-gcc symlink to the actual binary (xPack names it avr-gcc.exe)
+                fs.symlinkSync('avr-gcc.exe', pathModule.join(binDir, 'avr-gcc')); // eslint-disable-line @typescript-eslint/no-explicit-any — cross-platform symlink creation (per Node.js fs docs)
+            }
+        }
+        catch { /* Symlink failed — not critical on Windows */ }
+        // Also need avrdude for Arduino programming — download separately if needed
+        const avrdudeUrl = 'https://github.com/xPack-dev-tools/avrdude-xpack/releases/download/v7.3.0-1/xpack-avrdude-7.3.0-1.tar.gz';
+        try {
+            const avrdudeDestDir = pathModule.join(targetDir, 'avrdude');
+            if (!fs.existsSync(pathModule.join(avrdudeDestDir, 'bin', 'avrdude'))) {
+                downloadAndExtract({ url: avrdudeUrl }, avrdudeDestDir);
+            }
+        }
+        catch { /* Avrdude extraction failed — not critical for basic AVR support */ }
+    }
+}
+// ─── Architecture-Specific Toolchain Definitions (kept for API compatibility) ──────────────────────────────
 const TOOLCHAIN_FAMILIES = [
-    {
-        arch: 'x86_64',
-        name: 'x86_64-native', // No cross-compilation needed for x86_64 — native toolchain (per -cpu host docs)  
-        compilers: [{ name: 'gcc', version: '13.2.0', downloadUrl: 'https://github.com/xpack-dev-tools/gcc-x86-64/releases/download/v13.2.0-1/xpack-gcc-x86-64-13.2.0-1.tar.gz' }],
-    },
-    {
-        arch: 'aarch64',
-        name: 'aarch64-linux-gnu-toolchain', // ARM cross-compilation — from CROSS_COMPILE=aarch64-linux-gnu- in ARM docs  
-        compilers: [
-            { name: 'gcc', version: '13.2.0', downloadUrl: 'https://github.com/xpack-dev-tools/aarch64-none-elf-gcc/releases/download/v13.2.0-1/xpack-aarch64-none-elf-gcc-13.2.0-1.tar.gz' },
-            { name: 'g++', version: '13.2.0', downloadUrl: 'https://github.com/xpack-dev-tools/aarch64-none-elf-gcc/releases/download/v13.2.0-1/xpack-aarch64-none-elf-gcc-13.2.0-1.tar.gz' },
-        ],
-        interpreters: [
-            { name: 'qemu-aarch64', version: '11.0.0' }, // From QEMU 11.0.0 available via winget
-        ],
-    },
-    {
-        arch: 'avr',
-        name: 'avr-gcc-toolchain', // AVR cross-compilation — from -bios firmware.hex docs for bare-metal MCU programming  
-        compilers: [
-            { name: 'avr-gcc', version: '13.2.0', downloadUrl: 'https://github.com/xpack-dev-tools/avr-gcc-xpack/releases/download/v13.2.0-1/xpack-avr-gcc-13.2.0-1.tar.gz' }, // AVR-specific compiler!
-            { name: 'avr-objcopy', version: '2.45.1', downloadUrl: 'https://github.com/xpack-dev-tools/avr-binutils-xpack/releases/download/v2.45.1-1/xpack-avr-binutils-2.45.1-1.tar.gz' }, // Generates .hex flash images
-            { name: 'avrdude', version: '7.3.0', downloadUrl: 'https://github.com/xpack-dev-tools/avrdude-xpack/releases/download/v7.3.0-1/xpack-avrdude-7.3.0-1.tar.gz' }, // Arduino programmer! Per avrdude docs for AVR flashing
-        ],
-    },
-    {
-        arch: 'riscv64',
-        name: 'riscv64-linux-gnu-toolchain', // RISC-V cross-compilation — from CROSS_COMPILE=riscv64-linux-gnu- in RISC-V docs  
-        compilers: [
-            { name: 'gcc', version: '13.2.0', downloadUrl: 'https://github.com/riscv-collab/riscv64-gcc-gnu/releases/download/riscv64-newlib-13.2.0/riscv64-gcc-nolibc-linux-x86_64.tar.gz' }, // Per RISC-V GCC docs  
-        ],
-    },
+    { arch: 'x86_64', name: 'x86_64-native', compilers: [{ name: 'gcc', version: '13.2.0', downloadUrl: '' }] },
+    { arch: 'aarch64', name: 'aarch64-linux-gnu-toolchain', compilers: [] },
+    { arch: 'avr', name: 'avr-gcc-toolchain', compilers: [{ name: 'avr-gcc', version: '13.2.0', downloadUrl: '' }] },
+    { arch: 'riscv64', name: 'riscv64-linux-gnu-toolchain', compilers: [] },
+    // Add remaining architectures for API compatibility — same entries as above but with empty compiler arrays
 ];
 // ─── Toolchain Registry Class ──────────────────────────────
 class ToolchainRegistry {
+    toolchainsDir;
     constructor() {
-        const c = this.getPaths(); // Reuse existing config path helper (same pattern as engines/models dirs)  
-        this.toolchainsDir = pathModule.join(c.ENGINES_DIR, 'toolchains'); // $ENGINES_DIR/toolchains/<arch>/<version>/ per architecture docs
+        const c = this.getPaths();
+        this.toolchainsDir = pathModule.join(c.ENGINES_DIR, 'toolchains');
     }
     getPaths() {
         const appDataPath = process.platform === 'win32'
@@ -97,69 +115,46 @@ class ToolchainRegistry {
         };
     }
     ensureToolchain(arch) {
-        // Check local cache in $ENGINES_DIR/toolchains/<arch>/<version>/ — same pattern as model caching in hfClient.ts  
         const family = TOOLCHAIN_FAMILIES.find(f => f.arch === arch);
         if (!family)
             throw new Error(`No toolchain available for architecture: ${arch}`);
         const cachedPath = pathModule.join(this.toolchainsDir, family.name);
         if (fs.existsSync(cachedPath))
-            return Promise.resolve(family); // Already installed — per toolchain docs recommendation
-        // Download and cache from architecture-specific mirror — same pattern as HuggingFace model downloads in hfClient.ts  
-        return this.downloadToolchain(family).then(() => family);
-    }
-    downloadToolchain(family) {
-        const targetDir = pathModule.join(this.toolchainsDir, family.name);
-        if (fs.existsSync(targetDir))
-            return Promise.resolve(); // Already downloaded — per QEMU tools docs recommendation
-        // Download each compiler binary — verify checksum per QEMU tools docs chapter on disk image security
-        const downloads = family.compilers.map((comp) => this.downloadBinary(comp.downloadUrl, pathModule.join(targetDir, 'bin', comp.name)));
-        return Promise.all(downloads).then(() => {
-            // Make all binaries executable on Unix-like platforms — per QEMU tools docs for cross-compilation setup  
-            if (process.platform !== 'win32') {
-                const binDir = pathModule.join(targetDir, 'bin');
-                fs.readdirSync(binDir).forEach(file => {
-                    try {
-                        fs.chmodSync(pathModule.join(binDir, file), '0755');
-                    }
-                    catch { } // Per chmod docs for Unix executables  
-                });
-            }
-        });
-    }
-    downloadBinary(url, destPath) {
-        // Download + verify checksum — same pattern as your existing model downloads in hfClient.ts (per QEMU tools security docs)  
-        return new Promise((resolve, reject) => {
-            const req = axios_1.default.get(url, { responseType: 'stream' }); // Per Axios streaming docs for large binary downloads
-            const writer = fs.createWriteStream(destPath); // Write to disk per architecture-specific path conventions
-            req.then(r => r.data.pipe(writer)).then(() => resolve()).catch(reject); // Stream completion per Node.js stream docs  
+            return Promise.resolve(family);
+        // Download and extract the toolchain archive
+        const archiveInfo = TOOLCHAIN_ARCHIVES[arch];
+        if (!archiveInfo)
+            throw new Error(`No toolchain archive available for architecture: ${arch}`);
+        return downloadAndExtract(archiveInfo, cachedPath).then(() => {
+            postExtractSetup(arch, cachedPath);
+            return family;
         });
     }
     // Per-project toolchain selection — like .openllmcode-toolchainrc file for specifying required versions per architecture  
     async getProjectToolchains(projectDir) {
-        const rcFile = pathModule.join(projectDir, '.openllmcode-toolchainrc'); // Per-project toolchain config — same pattern as .gitignore/.editorconfig
+        const rcFile = pathModule.join(projectDir, '.openllmcode-toolchainrc');
         if (!fs.existsSync(rcFile))
             return {};
-        // Parse config — e.g., { "qemu": { "aarch64": "13.2.0", "avr": "13.2.0" } } (per architecture docs)  
         const config = JSON.parse(fs.readFileSync(rcFile, 'utf-8'));
         const result = {};
-        for (const [vmArch, version] of Object.entries(config.qemu || {})) { // Per -qemu toolchain docs in project config
-            const family = TOOLCHAIN_FAMILIES.find(f => f.arch === vmArch);
-            if (family && typeof version === 'string' && family.name.includes(version)) {
-                result[vmArch] = family; // Match architecture-specific toolchain per QEMU cross-compile docs  
+        for (const vmArch of Object.keys(config.qemu || {})) {
+            if (TOOLCHAIN_FAMILIES.some(f => f.arch === vmArch)) {
+                const family = TOOLCHAIN_FAMILIES.find(f => f.arch === vmArch);
+                result[vmArch] = family;
             }
         }
-        return result; // Return only the architectures that have available toolchains for this project
+        return result;
     }
     getAvailableToolchains() {
         return TOOLCHAIN_FAMILIES;
     }
     hasToolchainForArch(arch) {
-        return TOOLCHAIN_FAMILIES.some(f => f.arch === arch);
+        return TOOLCHAIN_ARCHIVES.hasOwnProperty(arch);
     }
 }
 // ─── Singleton Export ──────────────────────────────
 let _instance = null;
-function getToolchainRegistry() {
+export function getToolchainRegistry() {
     if (!_instance)
         _instance = new ToolchainRegistry();
     return _instance;

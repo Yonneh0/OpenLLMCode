@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import ApprovalGate from './components/ApprovalGate';
 import CheckpointPanel from './components/CheckpointPanel';
+import { NoModelDialog } from './components/NoModelDialog';
+import { PinguAwakeDialog } from './components/PinguAwakeDialog';
 import TaskPanel from './components/TaskPanel';
 import { McpPanel } from './components/McpPanel';
 import VMPanel from './components/VMPanel';
@@ -24,7 +26,6 @@ import SemanticSearchPanel from './components/SemanticSearchPanel';
 import CIDCPanel from './components/CIDCPanel';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import APIDocBrowser from './components/APIDocBrowser';
-import { NoModelDialog } from './components/NoModelDialog';
 
 // Default generation config — used as the source of truth for all panels
 const DEFAULT_CONFIG: GenerationConfig = {
@@ -105,15 +106,27 @@ export function App() {
   const hasGguf = usePinguStore(s => s.hasGguf);
   const isAwake = usePinguStore(s => s.isAwake);
   const isPinned = usePinguStore(s => s.isPinned);
+  const hasLlamaCpp = usePinguStore(s => s.hasLlamaCpp);
   
   // Show NoModel dialog when Pingu has no GGUF and user clicks him (or on first launch)
   const [showNoModelDialog, setShowNoModelDialog] = useState(!hasGguf && !isAwake);
+  // Show Awake dialog when has GGUF but no llama.cpp binary yet
+  const [showAwakeDialog, setShowAwakeDialog] = useState(false);
 
   // Listen for pingu-chat-open event from store
   React.useEffect(() => {
     if (!isPinned || isAwake || hasGguf) return;
     setShowNoModelDialog(true);
   }, [isPinned, isAwake, hasGguf]);
+
+  // Show awake dialog when model loaded but llama.cpp binary missing
+  React.useEffect(() => {
+    if (!isPinned && !showAwakeDialog && hasLlamaCpp === false && hasGguf) {
+      setShowAwakeDialog(true);
+    } else if (hasLlamaCpp && showAwakeDialog) {
+      setShowAwakeDialog(false);
+    }
+  }, [hasLlamaCpp, hasGguf, isPinned]);
 
   // Reset no-model dialog when a GGUF is loaded or Pingu awakens
   React.useEffect(() => {
@@ -354,6 +367,11 @@ export function App() {
       {/* Pingu Home Tile — bottom-left corner of the full UI window (Phase 1) */}
       <PenguinHomeTile />
 
+      {/* Awake Dialog — shown after GGUF loaded but before llama.cpp binary found (Phase 3) */}
+      {showAwakeDialog && !isPinned && !hasLlamaCpp && hasGguf && (
+        <PinguAwakeDialog onClose={() => setShowAwakeDialog(false)} />
+      )}
+
       {/* No-Model Dialog — shown when no GGUF loaded and user clicks Pingu (Phase 2) */}
       {showNoModelDialog && !isAwake && !hasGguf && (
         <NoModelDialog onClose={() => setShowNoModelDialog(false)} />
@@ -466,16 +484,16 @@ function PinnedChatDialog() {
 function ChatInput() {
   const [message, setMessage] = useState('');
   
-  // Send message to Pingu via SystemAI IPC
+  // Send message to Pingu via SystemAI IPC (not electron directly)
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!message.trim()) return;
     
     try {
-      await (window as any).electron?.sendSystemAIMessage(message);
+      await window.api?.systemAI?.sendMessage(message);
       setMessage('');
     } catch {
-      // Send failed
+      // Send failed — silently ignore (Pingu may not be awake yet)
     }
   }
   

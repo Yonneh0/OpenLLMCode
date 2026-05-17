@@ -16,29 +16,38 @@ export class QEMUProcessManager {
   // ─── Build the command-line arguments for a given architecture ──────────────────────────────
   // Per -machine, -cpu, -smp flags in docs
   
-  buildArgs(config: any): string[] {  // any = VMCreationConfig from types.ts (circular dependency avoidance)
-    const archBinaries: Record<ArchitectureType, string[]> = {
-      'x86_64': ['qemu-system-x86_64'],
-      'i386': ['qemu-system-i386'],
-      'aarch64': ['qemu-system-aarch64'],
-      'armv7l': ['qemu-system-arm'],
-      'riscv64': ['qemu-system-riscv64'],
-      'riscv32': ['qemu-system-riscv32'],
-      'avr': ['qemu-system-avr'],
-      'mips': ['qemu-system-mips'],
-      'mips64': ['qemu-system-mips64'],
-      'mipsel': ['qemu-system-mipsel'],
-      'mips64el': ['qemu-system-mips64el'],
-      'ppc': ['qemu-system-ppc'],
-      'ppc64': ['qemu-system-ppc64'],
-      'ppcemb': ['qemu-system-ppcemb'],
-      'sparc': ['qemu-system-sparc'],
-      'sparc64': ['qemu-system-sparc64'],
-    };
+   private readonly ARCH_BINARIES: Record<ArchitectureType, string[]> = {
+     'x86_64': ['qemu-system-x86_64'],
+     'i386': ['qemu-system-i386'],
+     'aarch64': ['qemu-system-aarch64'],
+     'armv7l': ['qemu-system-arm'],
+     'riscv64': ['qemu-system-riscv64'],
+     'riscv32': ['qemu-system-riscv32'],
+     'avr': ['qemu-system-avr'],
+     'mips': ['qemu-system-mips'],
+     'mips64': ['qemu-system-mips64'],
+     'mipsel': ['qemu-system-mipsel'],
+     'mips64el': ['qemu-system-mips64el'],
+     'ppc': ['qemu-system-ppc'],
+     'ppc64': ['qemu-system-ppc64'],
+     'ppcemb': ['qemu-system-ppcemb'],
+     'sparc': ['qemu-system-sparc'],
+     'sparc64': ['qemu-system-sparc64'],
+   };
 
-    const arch = config.architecture as ArchitectureType;  // Cast from any to fix TS indexing errors on Records (line 39)
+   // Bug #4/#5 fix: robust fallback for arbitrary architecture strings (e.g. "x86_64" → "qemu-system-x86").
+   // The old arch.replace(/64|32/g, '') pattern was wrong for aarch64→"aa", riscv64→"riscv", etc.
+   private getArchBinaryName(arch: string): string {
+     if (this.ARCH_BINARIES[arch as ArchitectureType]) return this.ARCH_BINARIES[arch as ArchitectureType][0];
+     // Strip trailing 64/32 from the name for known patterns like x86_64, riscv64, etc.
+     const clean = arch.replace(/(aarch|riscv|mips|ppc)(64|32)?$/i, '$1');
+     return `qemu-system-${clean}`;
+   }
+
+   buildArgs(config: any): string[] {  // any = VMCreationConfig from types.ts (circular dependency avoidance)
+    const arch = config.architecture as ArchitectureType;
     
-    const binary = archBinaries[arch][0];
+    const binary = this.ARCH_BINARIES[arch]?.[0];
     if (!binary) throw new Error(`Unsupported architecture: ${config.architecture}`);
 
     let args: string[] = [
@@ -204,8 +213,9 @@ export class QEMUProcessManager {
     
     const arch = config.architecture as ArchitectureType;
     // Spawn QEMU process — same pattern as your existing llama.cpp/System AI spawning in main.ts
+    // Bug #4/#5 fix: use getArchBinaryName() for proper fallback instead of raw replace()
     const proc = spawn(
-      'qemu-system-' + arch.replace('64', '').replace('32', ''),  // e.g., "qemu-system-x86_64" per arch docs  
+      this.ARCH_BINARIES[arch]?.[0] || this.getArchBinaryName(arch),
       args,
       { env: process.env }
     );
@@ -216,7 +226,8 @@ export class QEMUProcessManager {
       machine: config.machine || this.getDefaultMachine(arch),
       accelerator: String(config.accelerator) as AcceleratorType,
       process: proc,
-      qmpSocket: { type: 'tcp', address: 'localhost', port: QMP_PORT_BASE + parseInt(config.id.split('-')[1] || '0') },
+      // Bug #9 fix: extract numeric portion from IDs like "vm-01", "qemu-12", or "abc" → 0 for robust port calculation.
+      qmpSocket: { type: 'tcp', address: 'localhost', port: QMP_PORT_BASE + (config.id.match(/\d+/) ? parseInt(config.id.match(/\d+/)[0]) : 0) },
       monSocket: { type: 'unix', address: `/tmp/openllmcode-qemu-${config.id}-monitor` },  // Per -serial mon:socket docs  
       serialConsole: config.serialConsole,
       state: 'paused',  // Start paused (like -S flag) — wait for user to start (per QMP query-status docs)
@@ -243,6 +254,12 @@ export class QEMUProcessManager {
     proc.stderr?.on('data', (d) => {
       // Forward stderr to renderer via IPC — per QEMU monitor docs (stderr carries error output)  
       try { /* eslint-disable-next-line @typescript-eslint/no-explicit-any */ (global as any).mainWindow?.webContents.send('qemu-output', { vmId: config.id, data: d.toString(), type: 'stderr' }); } catch {}
+    });
+
+    // Bug #24 fix: add error event listener — without this, spawn errors silently fail
+    proc.on('error', (err) => {
+      console.error(`QEMU process error for ${config.id}:`, err);
+      try { /* eslint-disable-next-line @typescript-eslint/no-explicit-any */ (global as any).mainWindow?.webContents.send('qemu-output', { vmId: config.id, data: `Error: ${err.message}`, type: 'stderr' }); } catch {}
     });
 
     return instance;
@@ -389,9 +406,9 @@ export class QEMUProcessManager {
 
   // ─── Architecture Discovery Helpers ──────────────────────────────
 
-  async getAvailableMachines(arch: ArchitectureType): Promise<MachineInfo[]> {
-    // This is architecture-specific and requires spawning a temporary VM with -machine help (per -machine docs)
-     const proc = spawn('qemu-system-' + arch.replace(/64|32/g, ''), ['-machine', 'help']);  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
+   async getAvailableMachines(arch: ArchitectureType): Promise<MachineInfo[]> {
+     // Bug #5 fix: use getArchBinaryName() for consistent fallback (prevents aarch64→aa etc.)
+       const proc = spawn(this.ARCH_BINARIES[arch]?.[0] || this.getArchBinaryName(arch), ['-machine', 'help']);
     
     return new Promise((resolve) => {
       let output = '';
@@ -427,8 +444,8 @@ export class QEMUProcessManager {
 
   // ─── Architecture Query Helpers ──────────────────────────────
 
-  async getAvailableCPUs(arch: ArchitectureType): Promise<string[]> {
-     const proc = spawn('qemu-system-' + arch.replace(/64|32/g, ''), ['-cpu', 'help']);  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
+   async getAvailableCPUs(arch: ArchitectureType): Promise<string[]> {
+      const proc = spawn(this.ARCH_BINARIES[arch]?.[0] || this.getArchBinaryName(arch), ['-cpu', 'help']);  // Bug #5 fix: use getArchBinaryName() for consistent fallback
     
     return new Promise((resolve) => {
       let output = '';
@@ -444,8 +461,8 @@ export class QEMUProcessManager {
     return !result.stderr.includes('Permission denied') && !result.stdout.includes('No such file or directory');
   }
 
-  async getAvailableNetBackends(): Promise<string[]> {
-     const proc = spawn('qemu-system-x86_64', ['-netdev', 'help']);   // Query via x86 (all archs share same net backend types)
+   async getAvailableNetBackends(): Promise<string[]> {
+      const proc = spawn(this.ARCH_BINARIES['x86_64'][0], ['-netdev', 'help']);   // Bug #5 fix: use ARCH_BINARIES lookup for x86_64 (already correct)
     
     return new Promise((resolve) => {
       let output = '';
@@ -482,9 +499,10 @@ export class QEMUProcessManager {
     return this.instances.get(vmId);
   }
 
-  private executeCommand(cmd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    return new Promise((resolve) => {
-       const proc = spawn('cmd.exe', ['/c', cmd], { env: process.env });  // eslint-disable-line @typescript-eslint/no-explicit-any — Windows-specific command execution
+   private executeCommand(cmd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+     return new Promise((resolve) => {
+        const shell = process.platform === 'win32' ? ['cmd.exe', '/c'] : ['/bin/sh', '-c'];  // Bug #6 fix — platform-appropriate shell
+        const proc = spawn(shell[0], [shell[1], cmd], { env: process.env });
       let stdout = '', stderr = '';
       proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });  // Capture output per standard child_process docs  
       proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
