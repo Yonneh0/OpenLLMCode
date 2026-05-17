@@ -13,7 +13,12 @@ export default defineConfig({
       // Externalize Node.js builtins — Vite bundles these as undefined in the renderer context
       // because they don't exist in a browser. With nodeIntegration enabled, the renderer has 
       // native require() and process globals, so we just need to tell Vite not to bundle them.
-      external: ['path', 'fs', 'child_process', 'net', 'os', 'crypto'],
+      external: [
+        'path', 'fs', 'child_process', 'net', 'os', 'crypto',
+        'node:process', 'node:stream', 'node:fs', 'node:os', 'node:tls',
+        'tls', 'stream', 'util', 'url', 'events', 'buffer', 'dns', 
+        'string_decoder', 'assert'
+      ],
     },
   },
   plugins: [react(), tailwindcss()],

@@ -4,6 +4,34 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OpenLLMCode</title>
+
+  <!-- Patch externalized Node.js builtins BEFORE the main bundle loads -->
+  <script type="module">
+    // Vite sets externalized modules to undefined in the bundle. When ioredis (and other packages) try
+    // to extend EventEmitter, Stream, Buffer, etc., they get `undefined` because these are imported via
+    // require() but set to undefined during bundling. This script patches them on globalThis so that any
+    // code accessing globalThis.EventEmitter / globalThis.Buffer will find the real implementations.
+    const patch = (name, mod) => {
+      if (typeof globalThis[name] === 'undefined') {
+        globalThis[name] = mod;
+      }
+    };
+
+    try {
+      patch('EventEmitter', require('events').EventEmitter || require('events'));
+      patch('Buffer', Buffer);
+      patch('process', process);
+      patch('setImmediate', typeof setImmediate !== 'undefined' ? setImmediate : null);
+      patch('clearImmediate', typeof clearImmediate !== 'undefined' ? clearImmediate : null);
+    } catch (e) { /* ignore — will fall back to undefined */ }
+
+    // Also export as ES modules in case other code imports these
+    window.__NODE_MODULES__ = {
+      EventEmitter: globalThis.EventEmitter,
+      Buffer: globalThis.Buffer,
+      process: globalThis.process,
+    };
+  </script>
   <script type="module" src="/main.tsx"></script>
 </head>
 <body class="m-0 p-0 overflow-hidden bg-[#1e1e2e] text-white font-sans">

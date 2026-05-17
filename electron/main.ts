@@ -24,7 +24,8 @@ async function getEngineLogger(): Promise<typeof import('../src/engine/engineLog
     // Use dynamic import for engine logger — avoids CommonJS require() violation
     const engineLoggerPath = process.env.NODE_ENV === 'development'
       ? pathModule.join(__dirname, '..', 'src', 'engine', 'engineLogger')
-      : pathModule.join(process.resourcesPath, 'app.asar.unpacked', 'dist', 'src', 'engine', 'engineLogger');
+      // Bug #17 fix: production path uses 'app/dist/' not 'app.asar.unpacked/dist' for asar=false builds.
+      : pathModule.join(process.resourcesPath, 'app', 'dist', 'src', 'engine', 'engineLogger');
     try {
       _engineLogger = await import(engineLoggerPath);
     } catch {
@@ -1212,6 +1213,7 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
 }
 
 // ─── App Lifecycle ──────────────────────────────────────────────
+// ─── App Lifecycle ──────────────────────────────────────────────
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -1222,6 +1224,7 @@ function createMainWindow() {
      webPreferences: { 
        nodeIntegration: true, 
        contextIsolation: false, 
+       // Preload lives at <appDir>/resources/app/dist/preload/preload.js relative to __dirname (electron/).
        preload: pathModule.join(__dirname, '..', 'preload', 'preload.js') 
      },
   });
@@ -1231,10 +1234,9 @@ function createMainWindow() {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
    } else {
-     // In production (asar=false on Windows), electron-builder copies "dist/**/*" into <appDir>/resources/app/
-     // __dirname points to <appDir>/resources/app/electron/ — so ".." goes to resourcesPath, then dist/index.html.
-     // Vite output: index.html at resourcesPath/dist/index.html, assets at resourcesPath/dist/assets/
-      mainWindow.loadFile(pathModule.join(__dirname, '..', 'dist', 'index.html'));
+      // In production (asar=false on Windows), electron-builder copies "dist/**/*" into <appDir>/resources/app/.
+      // __dirname = <appDir>/resources/app/dist/electron/ — go up one level to dist/, then index.html.
+       mainWindow.loadFile(pathModule.join(__dirname, '..', 'index.html'));
    }
 
   mainWindow.on('closed', () => { mainWindow = null; });
