@@ -6,7 +6,7 @@ import CheckpointPanel from './components/CheckpointPanel';
 import TaskPanel from './components/TaskPanel';
 import { McpPanel } from './components/McpPanel';
 import VMPanel from './components/VMPanel';
-import { PinguAvatar } from './components/PinguAvatar';
+import { PenguinHomeTile } from './components/PenguinHomeTile';
 import { MonacoEditor } from './components/MonacoEditor';
 import { XTermTerminal } from './components/XTermTerminal';
 import { ProjectWizard } from './components/ProjectWizard';
@@ -20,6 +20,11 @@ import { NotificationOverlay } from './components/NotificationOverlay';
 import { AppUpdateDialog, useAutoAppUpdateCheck } from './components/AppUpdateDialog';
 import { usePinguStore } from './store/pinguStore';
 import VMCreationWizard from './components/VMCreationWizard';
+import SemanticSearchPanel from './components/SemanticSearchPanel';
+import CIDCPanel from './components/CIDCPanel';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
+import APIDocBrowser from './components/APIDocBrowser';
+import { NoModelDialog } from './components/NoModelDialog';
 
 // Default generation config — used as the source of truth for all panels
 const DEFAULT_CONFIG: GenerationConfig = {
@@ -94,7 +99,26 @@ export function App() {
 
   // Activity bar active tab state
   const [activeActivityId, setActiveActivityId] = useState('explorer');
-  const [sidebarActiveTab, setSidebarActiveTab] = useState<'project' | 'tasks' | 'mcp' | 'vm'>('project');
+   const [sidebarActiveTab, setSidebarActiveTab] = useState<'project' | 'tasks' | 'mcp' | 'vm' | 'search' | 'cicd' | 'analytics' | 'apiDocs'>('project');
+
+  // ─── Phase 1-2: Pingu state for dialogs ──────────────
+  const hasGguf = usePinguStore(s => s.hasGguf);
+  const isAwake = usePinguStore(s => s.isAwake);
+  const isPinned = usePinguStore(s => s.isPinned);
+  
+  // Show NoModel dialog when Pingu has no GGUF and user clicks him (or on first launch)
+  const [showNoModelDialog, setShowNoModelDialog] = useState(!hasGguf && !isAwake);
+
+  // Listen for pingu-chat-open event from store
+  React.useEffect(() => {
+    if (!isPinned || isAwake || hasGguf) return;
+    setShowNoModelDialog(true);
+  }, [isPinned, isAwake, hasGguf]);
+
+  // Reset no-model dialog when a GGUF is loaded or Pingu awakens
+  React.useEffect(() => {
+    if (hasGguf || isAwake) setShowNoModelDialog(false);
+  }, [hasGguf, isAwake]);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#1E1E1E] text-white font-sans">
@@ -144,6 +168,38 @@ export function App() {
               >
                 VMs
               </button>
+              <button
+                onClick={() => setSidebarActiveTab('search')}
+                className={`px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+                  sidebarActiveTab === 'search' ? 'text-white border-b border-[#007ACC]' : 'text-[#858585] hover:text-[#CCCCCC]'
+                }`}
+              >
+                Search
+              </button>
+              <button
+                onClick={() => setSidebarActiveTab('cicd')}
+                className={`px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+                  sidebarActiveTab === 'cicd' ? 'text-white border-b border-[#007ACC]' : 'text-[#858585] hover:text-[#CCCCCC]'
+                }`}
+              >
+                CI/CD
+              </button>
+              <button
+                onClick={() => setSidebarActiveTab('analytics')}
+                className={`px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+                  sidebarActiveTab === 'analytics' ? 'text-white border-b border-[#007ACC]' : 'text-[#858585] hover:text-[#CCCCCC]'
+                }`}
+              >
+                Analytics
+              </button>
+              <button
+                onClick={() => setSidebarActiveTab('apiDocs')}
+                className={`px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+                  sidebarActiveTab === 'apiDocs' ? 'text-white border-b border-[#007ACC]' : 'text-[#858585] hover:text-[#CCCCCC]'
+                }`}
+              >
+                API Docs
+              </button>
             </div>
 
             {/* Section header — Project section */}
@@ -184,6 +240,34 @@ export function App() {
               </div>
             )}
 
+            {/* Semantic Search — architecture-aware HNSW vector similarity search (Phase G.1-G.2) */}
+            {sidebarActiveTab === 'search' && (
+              <div className="flex-1 overflow-y-auto border-t border-[#404040]">
+                <SemanticSearchPanel />
+              </div>
+            )}
+
+            {/* CI/CD Integration — GitHub Actions generator, deploy, test, review (Phase J.1-J.3) */}
+            {sidebarActiveTab === 'cicd' && (
+              <div className="flex-1 overflow-y-auto border-t border-[#404040]">
+                <CIDCPanel />
+              </div>
+            )}
+
+             {/* Analytics Dashboard — productivity, AI usage, time tracking, goals (Phase K.1-K.3) */}
+            {sidebarActiveTab === 'analytics' && (
+              <div className="flex-1 overflow-y-auto border-t border-[#404040]">
+                <AnalyticsDashboard />
+              </div>
+            )}
+
+             {/* API Documentation Browser — browse and search API docs inline (Phase L.1-L.3) */}
+            {sidebarActiveTab === 'apiDocs' && (
+              <div className="flex-1 overflow-y-auto border-t border-[#404040]">
+                <APIDocBrowser />
+              </div>
+            )}
+
             {/* Skills panel toggle button (P2-C) — only show when Project tab is active */}
             {sidebarActiveTab === 'project' && !showSkillsPanel && (
               <button 
@@ -202,8 +286,7 @@ export function App() {
               </div>
             )}
 
-            {/* Pingu Home area — bottom of sidebar */}
-            <PinguHomePanel />
+            {/* Pingu Home area — bottom of sidebar (removed - Pingu now on home tile) */}
           </aside>
 
           {/* Editor area — MonacoEditor + Terminal stack vertically */}
@@ -260,14 +343,24 @@ export function App() {
       {/* QEMU VM Creation Wizard — opened from VMPanel "+ Create VM" button or empty state */}
       <VMCreationWizard isOpen={vmWizardOpen} onClose={() => setVmWizardOpen(false)} />
 
-      {/* Pingu Avatar — System AI mascot in corner of UI (positioned via CSS absolute) */}
-      <PinguAvatar position="bottom-right" />
+      {/* Pingu Avatar — System AI mascot in corner of UI (positioned via CSS absolute) - REMOVED, replaced by PenguinHomeTile */}
 
       {/* Toast Notifications — for MCP reconnects, context compression, etc. */}
       <NotificationOverlay />
 
       {/* App Update Dialog — shows when a new version is available (P3-C) */}
       <AppUpdateDialog isOpen={appUpdateOpen} onClose={() => setAppUpdateOpen(false)} />
+
+      {/* Pingu Home Tile — bottom-left corner of the full UI window (Phase 1) */}
+      <PenguinHomeTile />
+
+      {/* No-Model Dialog — shown when no GGUF loaded and user clicks Pingu (Phase 2) */}
+      {showNoModelDialog && !isAwake && !hasGguf && (
+        <NoModelDialog onClose={() => setShowNoModelDialog(false)} />
+      )}
+
+      {/* Pinned Chat Dialog — shown when user clicks pinned Pingu to alter his behavior (Phase 5) */}
+      {isPinned && <PinnedChatDialog />}
     </div>
   );
 }
@@ -275,112 +368,144 @@ export function App() {
 // P2-C: SkillPanel component — lazy-loaded from sidebar toggle in chat panel
 const SkillPanel = React.lazy(() => import('./components/SkillPanel').then(m => ({ default: m.SkillPanel })));
 
-// ─── Pingu Home Panel (bottom of ActivityBar + Sidebar) ──────────────
+// ─── Phase 5: Pinned Chat Dialog Component ──────────────
 
-interface PinguHomePanelProps {
-  showAbout?: boolean;
-}
-
-const PinguHomePanel: React.FC<PinguHomePanelProps> = ({ showAbout }) => {
-  const [showAboutInternal, setShowAboutInternal] = React.useState(false);
+function PinnedChatDialog() {
+  const unpinPingu = usePinguStore(s => s.unpinPingu);
   
-  // Fun fact rotation
-  const funFacts = [
-    "🐧 Penguins propose to their mates with a smooth pebble!",
-    "🐧 Emperor penguins can dive deeper than any other bird — over 500 meters!",
-    "🐧 Penguin feathers are so dense they provide excellent insulation.",
-    "🐧 King penguins have bright orange patches for social signaling.",
-    "🐧 Penguins swim at speeds up to 12 miles per hour!",
-  ];
-  const [funFact, setFunFact] = React.useState(0);
-
   return (
-    <div className="flex-shrink-0 border-t border-[#404040] bg-[#181818]/60 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#404040] bg-[#181818]/60">
-        <span className="text-xs font-semibold text-[#858585] uppercase tracking-wider flex items-center gap-1.5">
-          🐧 Pingu Home
-        </span>
-        <button 
-          onClick={() => setShowAboutInternal(!showAboutInternal)}
-          className="p-0.5 rounded hover:bg-[#404040] transition text-xs"
-          title="About Pingu"
-        >
-          ⓘ
-        </button>
-      </div>
-
-      {/* About section */}
-      {showAboutInternal && (
-        <div className="px-3 py-2 border-b border-[#404040]">
-          <p className="text-xs text-[#858585] mb-1.5">Pingu — Your AI Companion</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      {/* Backdrop */}
+      <div className="absolute inset-0" onClick={unpinPingu} />
+      
+      {/* Dialog — pinned Pingu + chat interface */}
+      <div className="relative rounded-xl shadow-2xl border border-[#45475a] w-[680px] max-h-[80vh] overflow-y-auto bg-[#1e1e2e]">
+        {/* Header — pinned Pingu + title */}
+        <div className="px-4 py-3 border-b border-[#45475a] flex items-center gap-3">
+          {/* Pinned Pingu icon — staring at user */}
+          <svg width="36" height="40" viewBox="0 0 36 40" className="flex-shrink-0">
+            <ellipse cx="18" cy="37" rx="12" ry="3.5" fill="#F9E2AF"/>
+            <circle cx="18" cy="24" r="13" fill="#8B5E3C"/>
+            <circle cx="10" cy="18" r="6" fill="#F9E2AF" stroke="#5C2716" strokeWidth="2"/>
+            <circle cx="26" cy="18" r="6" fill="#F9E2AF" stroke="#5C2716" strokeWidth="2"/>
+            <circle cx="10.5" cy="17" r="2" fill="#5C2716"/>
+            <circle cx="26.5" cy="17" r="2" fill="#5C2716"/>
+            <ellipse cx="18" cy="22" rx="3" ry="2" fill="#D97B3A">
+              <animate attributeName="ry" values="2;3;2" dur="1s" repeatCount="indefinite"/>
+            </ellipse>
+          </svg>
+          
+          {/* Title */}
+          <div className="flex-1">
+            <h2 className="text-sm font-semibold text-[#cdd6f4]">Pingu is Pinned</h2>
+            <p className="text-xs text-[#a6adc8] opacity-70">Click outside or hit Unpin to let him go.</p>
+          </div>
+          
+          {/* Close button */}
           <button 
-            onClick={() => setFunFact((f) => (f + 1) % funFacts.length)}
-            className="w-full px-2 py-1 rounded bg-[#404040] hover:bg-[#505050] text-xs text-[#858585] transition"
+            onClick={unpinPingu}
+            className="p-1 rounded hover:bg-[#313244] transition text-sm"
           >
-            {funFacts[funFact]}
+            ✕
           </button>
         </div>
-      )}
-
-      {/* Quick actions */}
-      <div className="px-3 py-2 space-y-1">
-        <h4 className="text-[10px] font-semibold text-[#858585] uppercase tracking-wider mb-1">Quick Actions</h4>
         
-        <button 
-          onClick={() => usePinguStore.getState().togglePanel('skills')}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-[#2A2D2E] transition"
-        >
-          <span className="text-sm">🛠️</span> Skills
-        </button>
-        
-        <button 
-          onClick={() => usePinguStore.getState().togglePanel('settings')}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-[#2A2D2E] transition"
-        >
-          <span className="text-sm">⚙️</span> Settings
-        </button>
-        
-        <button 
-          onClick={() => usePinguStore.getState().togglePanel('models')}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-[#2A2D2E] transition"
-        >
-          <span className="text-sm">📦</span> Models
-        </button>
-        
-        <button 
-          onClick={() => usePinguStore.getState().togglePanel('logs')}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-[#2A2D2E] transition"
-        >
-          <span className="text-sm">📋</span> Activity Log
-        </button>
-      </div>
-
-      {/* System AI status */}
-      <div className="px-3 py-2 border-t border-[#404040] bg-[#181818]/60">
-        <h4 className="text-[10px] font-semibold text-[#858585] uppercase tracking-wider mb-1">System AI</h4>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="w-2 h-2 rounded-full bg-[#007ACC]"></span>
-          <span className="text-[#858585]">Engine Running</span>
+        {/* Content — intent/instructions + chat interface */}
+        <div className="p-4 space-y-4">
+          {/* Current instructions/purpose */}
+          <div>
+            <h3 className="text-xs font-semibold text-[#a6adc8] uppercase tracking-wider mb-2">Current Instructions</h3>
+            <div className="rounded bg-green-900/15 border border-green-700/40 px-3 py-2 text-xs text-green-300">
+              ✓ System AI is active and monitoring UI. Pingu will alert you if anything goes wrong.
+            </div>
+          </div>
+          
+          {/* Live inference statistics */}
+          <div>
+            <h3 className="text-xs font-semibold text-[#a6adc8] uppercase tracking-wider mb-2">Inference Stats</h3>
+            <div className="grid grid-cols-4 gap-2 text-xs">
+              <div className="rounded bg-[#1e1e2e]/60 border border-[#45475a] p-2">
+                <span className="text-[#858585] opacity-50 block mb-0.5">Tokens/sec</span>
+                <span className="text-[#cdd6f4] font-semibold">—</span>
+              </div>
+              <div className="rounded bg-[#1e1e2e]/60 border border-[#45475a] p-2">
+                <span className="text-[#858585] opacity-50 block mb-0.5">Context</span>
+                <span className="text-[#cdd6f4] font-semibold">— / —</span>
+              </div>
+              <div className="rounded bg-[#1e1e2e]/60 border border-[#45475a] p-2">
+                <span className="text-[#858585] opacity-50 block mb-0.5">GPU</span>
+                <span className="text-[#cdd6f4] font-semibold">—</span>
+              </div>
+              <div className="rounded bg-[#1e1e2e]/60 border border-[#45475a] p-2">
+                <span className="text-[#858585] opacity-50 block mb-0.5">Memory</span>
+                <span className="text-[#cdd6f4] font-semibold">— / —</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Chat input */}
+          <ChatInput />
         </div>
-      </div>
-
-      {/* Engine version info */}
-      <div className="px-3 py-2 border-t border-[#404040] bg-[#181818]/60">
-        <h4 className="text-[10px] font-semibold text-[#858585] uppercase tracking-wider mb-1">Engine</h4>
-        <div className="space-y-0.5 text-xs">
-          <span className="text-[#858585]">Version: v0.2.0</span>
-          <br />
-          <span className="text-[#858585]">Backend: CPU (AVX2)</span>
+        
+        {/* Footer — unpin button */}
+        <div className="px-4 py-3 border-t border-[#45475a] flex justify-end">
+          <button 
+            onClick={unpinPingu}
+            className="px-3 py-1.5 rounded text-xs bg-[#cba6f7]/20 hover:bg-[#cba6f7]/30 text-[#cba6f7] border border-[#cba6f7]/40 transition"
+          >
+            Unpin Pingu
+          </button>
         </div>
-      </div>
-
-      {/* Pingu mascot footer */}
-      <div className="px-3 py-2 border-t border-[#404040] flex items-center gap-2 bg-gradient-to-r from-[#1E1E1E]/80 to-transparent">
-        <span className="text-lg">🐧</span>
-        <span className="text-xs text-[#858585] italic">"Pingu is ready — click the icon to chat!"</span>
       </div>
     </div>
   );
-};
+}
 
+// ─── Phase 5: Chat Input Component ──────────────
+
+function ChatInput() {
+  const [message, setMessage] = useState('');
+  
+  // Send message to Pingu via SystemAI IPC
+  async function sendMessage(e: React.FormEvent) {
+    e.preventDefault();
+    if (!message.trim()) return;
+    
+    try {
+      await (window as any).electron?.sendSystemAIMessage(message);
+      setMessage('');
+    } catch {
+      // Send failed
+    }
+  }
+  
+  return (
+    <form onSubmit={sendMessage} className="flex gap-2">
+      <input
+        type="text"
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        placeholder="Tell Pingu something..."
+        className="flex-1 bg-[#1e1e2e] border border-[#45475a] rounded px-3 py-2 text-xs focus:outline-none focus:border-[#cba6f7]"
+      />
+      <button 
+        type="submit"
+        className="px-3 py-2 rounded bg-green-900/30 hover:bg-green-800/40 text-green-300 border border-green-700/40 text-xs font-semibold transition"
+      >
+        Send
+      </button>
+    </form>
+  );
+}
+
+// ─── Phase 5: CSS Animations (inline styles) ──────────────
+
+const styleTag = document.createElement('style');
+styleTag.textContent = `
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.animate-pulse-slow { animation: pulse-slow 2s ease-in-out infinite; }
+`;
+document.head.appendChild(styleTag);

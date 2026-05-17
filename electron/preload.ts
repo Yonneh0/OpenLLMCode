@@ -1,13 +1,18 @@
 // Preload script — exposes window.api for React components
-import { contextBridge, ipcRenderer } from 'electron';
+// With contextIsolation: false, this runs in the same context as the renderer (no isolated world)
+
+import { ipcRenderer } from 'electron';
 
 export interface AppConfig { backend?: string; binarySource?: string; selectedModel?: string; systemAIModel?: string; hfToken?: string; }
 
+// Node.js globals (process, Buffer) are natively available in the renderer via nodeIntegration: true
+
+
 // ─── Exported types for renderer use ──────────────────────────────
-export type Callback = (msg: unknown) => void;
+type Callback = (msg: unknown) => void;
 
 // ─── API interface namespace — used by Window.api in the global declaration below ──────────────────────────────
-export interface Api {
+interface Api {
   engine: {
     getConfig: () => Promise<AppConfig>;
     setConfig: (cfg: AppConfig) => Promise<void>;
@@ -25,6 +30,8 @@ export interface Api {
     deleteFile: (filePath: string) => Promise<boolean>;
     searchFiles: (payload: { path: string; regex: string; filePattern?: string }) => Promise<string>;
     glob: (payload: { pattern: string; path?: string }) => Promise<string>;
+    searchFilesIPC: (searchPath: string, regex: string, filePattern?: string) => Promise<string>;
+    globIPC: (pattern: string, baseDir?: string) => Promise<string>;
   };
   terminal: {
     spawn: () => Promise<string>;
@@ -140,7 +147,8 @@ declare global {
   }
 }
 
-contextBridge.exposeInMainWorld('api', {
+// With contextIsolation: false, use direct window assignment instead of contextBridge
+window.api = {
   // Engine Manager
   engine: {
     getConfig: () => ipcRenderer.invoke('engine-get-config') as Promise<AppConfig>,
@@ -333,4 +341,4 @@ contextBridge.exposeInMainWorld('api', {
     ensureToolchain: (arch: string) => ipcRenderer.invoke('qemu-toolchain-ensure', arch),
     getProjectToolchains: (projectDir: string) => ipcRenderer.invoke('qemu-toolchain-project-config', projectDir),
   },
-});
+};

@@ -879,11 +879,11 @@ function createMainWindow() {
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#1e1e2e',
-    webPreferences: { 
-      nodeIntegration: false, 
-      contextIsolation: true, 
-      preload: pathModule.join(__dirname, '..', 'preload', 'preload.js') 
-    },
+     webPreferences: { 
+       nodeIntegration: true, 
+       contextIsolation: false, 
+       preload: pathModule.join(__dirname, '..', 'preload', 'preload.js') 
+     },
   });
 
   const isDev = process.env.NODE_ENV === 'development';
@@ -891,6 +891,9 @@ function createMainWindow() {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
+    // In production (asar=false on Windows), electron-builder copies "dist/**/*" into <appDir>/resources/app/
+    // process.resourcesPath always resolves to <appDir>/resources/app regardless of directory structure.
+    // Vite output: index.html at resourcesPath/dist/index.html, assets at resourcesPath/dist/assets/
     mainWindow.loadFile(pathModule.join(__dirname, '..', 'index.html'));
   }
 
@@ -904,7 +907,7 @@ function startApp() {
 }
 
 // ─── App Lifecycle (top-level) ──────────────────────────────────────
-if (process.env.ELECTRON_RUN_AS_NODE) {
+if (process.env.ELECTRON_RUN_AS_NODE || process.type === 'renderer') {
   // In Electron renderer context, skip app startup — this happens when the preload script runs in the renderer process
   console.log('[main] Skipping Electron startup: running in Node.js context');
 } else if (app && typeof app.whenReady === 'function') {

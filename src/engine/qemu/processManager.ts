@@ -332,7 +332,7 @@ export class QEMUProcessManager {
       if (vm.process && !vm.process.killed) vm.process.kill('SIGKILL');
     }, 3000);
     
-    vm.state = 'shutdown-request' as any;  // Closest valid state — "stopped" not in VM_RUN_STATE enum (use shutdown-request per QMP spec)
+    vm.state = 'shuttingdown';  // Use enum value from VM_RUN_STATE — "stopped" is deprecated since QEMU 5.0 (per QMP docs)
   }
 
   async deleteVM(vmId: string): Promise<void> {
@@ -391,7 +391,7 @@ export class QEMUProcessManager {
 
   async getAvailableMachines(arch: ArchitectureType): Promise<MachineInfo[]> {
     // This is architecture-specific and requires spawning a temporary VM with -machine help (per -machine docs)
-    const proc = spawn('qemu-system-' + arch.replace('64', '').replace('32', '') as any, ['-machine', 'help']);  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
+     const proc = spawn('qemu-system-' + arch.replace(/64|32/g, ''), ['-machine', 'help']);  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
     
     return new Promise((resolve) => {
       let output = '';
@@ -428,7 +428,7 @@ export class QEMUProcessManager {
   // ─── Architecture Query Helpers ──────────────────────────────
 
   async getAvailableCPUs(arch: ArchitectureType): Promise<string[]> {
-    const proc = spawn('qemu-system-' + arch.replace('64', '').replace('32', '') as any, ['-cpu', 'help']);  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
+     const proc = spawn('qemu-system-' + arch.replace(/64|32/g, ''), ['-cpu', 'help']);  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
     
     return new Promise((resolve) => {
       let output = '';
@@ -445,7 +445,7 @@ export class QEMUProcessManager {
   }
 
   async getAvailableNetBackends(): Promise<string[]> {
-    const proc = spawn('qemu-system-x86_64' as any, ['-netdev', 'help']);   // Query via x86 (all archs share same net backend types) — eslint-disable-line @typescript-eslint/no-explicit-any
+     const proc = spawn('qemu-system-x86_64', ['-netdev', 'help']);   // Query via x86 (all archs share same net backend types)
     
     return new Promise((resolve) => {
       let output = '';
@@ -484,7 +484,7 @@ export class QEMUProcessManager {
 
   private executeCommand(cmd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
-      const proc = spawn('cmd.exe' as any, ['/c', cmd], { env: process.env });  // eslint-disable-line @typescript-eslint/no-explicit-any — dynamic binary name from config (per QEMU docs)
+       const proc = spawn('cmd.exe', ['/c', cmd], { env: process.env });  // eslint-disable-line @typescript-eslint/no-explicit-any — Windows-specific command execution
       let stdout = '', stderr = '';
       proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });  // Capture output per standard child_process docs  
       proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });

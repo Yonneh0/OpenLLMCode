@@ -15,6 +15,14 @@ const ACTIVITY_ITEMS: ActivityItem[] = [
   { id: 'aiChat', label: 'AI Chat', icon: '\u{1F916}' },
 ];
 
+// Sidebar tabs — shown in sidebar header bar (not activity bar)
+const SIDEBAR_TAB_ITEMS: ActivityItem[] = [
+  { id: 'project', label: 'Project', icon: '\u{1F4C1}' },
+  { id: 'tasks', label: 'Tasks', icon: '\u{1F4BE}' },
+  { id: 'mcp', label: 'MCP', icon: '\u2699\uFE0F' },
+  { id: 'vm', label: 'VMs', icon: '\u{1F5A5}' },
+];
+
 interface ActivityBarProps {
   activeId: string;
   onActiveChange?: (id: string) => void;
@@ -60,5 +68,32 @@ export function ActivityBar({ activeId, onActiveChange }: ActivityBarProps) {
     </div>
   );
 }
+
+// ─── Sidebar Tab Bar Component ──────────────
+
+interface SidebarTabBarProps {
+  activeId: string;
+  onActiveChange?: (id: string) => void;
+}
+
+const SidebarTabBar: React.FC<SidebarTabBarProps> = ({ activeId, onActiveChange }) => (
+  <div className="flex flex-col items-center gap-0.5 py-1">
+    {SIDEBAR_TAB_ITEMS.map(item => (
+      <button
+        key={item.id}
+        onClick={() => onActiveChange?.(item.id)}
+        title={item.label}
+        className={`relative w-full h-9 flex items-center justify-center cursor-pointer transition-colors ${
+          activeId === item.id ? 'text-white' : 'text-[#858585] hover:text-[#CCCCCC]'
+        }`}
+      >
+        {activeId === item.id && (
+          <span className="absolute left-0 top-2 bottom-2 w-[1.5px] bg-[#007ACC]" />
+        )}
+        <span className="text-base">{item.icon}</span>
+      </button>
+    ))}
+  </div>
+);
 
 export default ActivityBar;

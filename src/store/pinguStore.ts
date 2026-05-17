@@ -32,30 +32,71 @@ interface PinguState {
   // Animation speed multiplier for body bob
   bobSpeed: number;
   
-  // Actions — mood transitions
+  // ─── Phase 1-2: Home tile / Awakening states ──────────────
+  
+  // Whether Pingu has been awakened (model + llama.cpp both present)
+  isAwake: boolean;
+  
+  // Whether Pingu has a GGUF model loaded
+  hasGguf: boolean;
+  
+  // Whether Pingu has a compatible llama.cpp binary
+  hasLlamaCpp: boolean;
+  
+  // Whether Pingu is "violently pinned" by user click (pauses all behavior)
+  isPinned: boolean;
+  
+  // Position where Pingu was pinned (for dragging during pin state)
+  pinnedPosition?: { x: number; y: number };
+  
+  // Current animation phase for awakening sequence
+  awakeningPhase: 'none' | 'shake' | 'stretch' | 'glow';
+  
+  // Whether Pingu is currently loading a GGUF model (shows progress)
+  isLoadingModel: boolean;
+  
+  // Progress percentage of model download/loading
+  loadProgress: number;
+  
+  // ─── Actions — mood transitions ──────────────
   setMood: (mood: PinguMood) => void;
   resetMood: () => void;
   
-   // Actions — menu toggle
-   toggleMenu: () => void;
-   closeMenu: () => void;
-   
-   // Actions — panel management
-   openPanel: (panel: PinguPanelType) => void;
-   togglePanel: (panel: PinguPanelType) => void;
-   closePanel: () => void;
+  // ─── Actions — menu toggle ──────────────
+  toggleMenu: () => void;
+  closeMenu: () => void;
   
-  // Actions — visibility control
+  // ─── Actions — panel management ──────────────
+  openPanel: (panel: PinguPanelType) => void;
+  togglePanel: (panel: PinguPanelType) => void;
+  closePanel: () => void;
+  
+  // ─── Actions — visibility control ──────────────
   showPingu: () => void;
   hidePingu: () => void;
   
-  // Actions — cursor tracking (used by PinguAvatar component)
+  // ─── Actions — cursor tracking (used by PinguAvatar component) ──────────────
   setCursorPos: (x: number, y: number) => void;
   
-  // Actions — animation frame updates (used by requestAnimationFrame loop in PinguAvatar)
+  // ─── Actions — animation frame updates (used by requestAnimationFrame loop in PinguAvatar) ──────────────
   advanceMouthFrame: () => void;
   triggerBlink: () => void;
   updateBobSpeed: (speedMultiplier: number) => void;
+  
+  // ─── Phase 1-2 actions: awakening ──────────────
+  setAwake: (awake: boolean) => void;
+  setHasGguf: (hasGguf: boolean) => void;
+  setHasLlamaCpp: (hasLlamaCpp: boolean) => void;
+  
+  // Pin Pingu by clicking (violently pins in place, opens chat dialog)
+  pinAndOpenChat: () => void;
+  unpinPingu: () => void;
+  
+  // Start awakening sequence when both model and llama.cpp present
+  startAwakeningSequence: () => void;
+  
+  // Progress update for model loading
+  setLoadProgress: (progress: number) => void;
 }
 
 export const usePinguStore = create<PinguState>((set, get) => ({
@@ -68,6 +109,15 @@ export const usePinguStore = create<PinguState>((set, get) => ({
   mouthFrame: 0,
   isBlinking: false,
   bobSpeed: 1,
+  
+  // Phase 1-2 defaults — Pingu starts "asleep" until model + llama.cpp are ready
+  isAwake: false,
+  hasGguf: false,
+  hasLlamaCpp: false,
+  isPinned: false,
+  awakeningPhase: 'none',
+  isLoadingModel: false,
+  loadProgress: 0,
   
   setMood: (mood) => {
     // When transitioning to 'speaking', reset mouth frame so animation starts fresh
@@ -149,6 +199,69 @@ export const usePinguStore = create<PinguState>((set, get) => ({
   updateBobSpeed: (speedMultiplier) => {
     set({ bobSpeed: Math.max(0.5, Math.min(3, speedMultiplier)) });
   },
+  
+  // Phase 1-2: Awakening actions
+  
+  setAwake: (awake) => {
+    if (!get().isAwake && awake) {
+      // Transitioning to awake — start awakening sequence
+      get().startAwakeningSequence();
+    }
+    set({ isAwake: awake });
+  },
+  
+  setHasGguf: (hasGguf) => {
+    set({ hasGguf, isLoadingModel: false, loadProgress: 0 });
+    // If also has llama.cpp and not already awake — auto-awaken!
+    if (hasGguf && get().hasLlamaCpp && !get().isAwake) {
+      setTimeout(() => set({ isAwake: true }), 500);
+    }
+  },
+  
+  setHasLlamaCpp: (hasLlamaCpp) => {
+    set({ hasLlamaCpp });
+    // If also has GGUF and not already awake — auto-awaken!
+    if (hasLlamaCpp && get().hasGguf && !get().isAwake) {
+      setTimeout(() => set({ isAwake: true }), 500);
+    }
+  },
+  
+  pinAndOpenChat: () => {
+    const pos = get().pinnedPosition || { x: 0, y: 0 };
+    set({ isPinned: true, pinnedPosition: pos });
+    // TODO: Open chat dialog — handled by App.tsx via store state change
+    window.dispatchEvent(new CustomEvent('pingu-chat-open'));
+  },
+  
+  unpinPingu: () => {
+    set({ isPinned: false });
+    window.dispatchEvent(new CustomEvent('pingu-chat-close'));
+  },
+  
+  startAwakeningSequence: () => {
+    // Phase 1: Shake for 0.5s, Phase 2: Stretch for 2s, Phase 3: Eyes glow
+    set({ awakeningPhase: 'shake' });
+    
+    setTimeout(() => {
+      if (!get().isAwake) return; // User may have toggled off during sequence
+      set({ awakeningPhase: 'stretch' });
+      
+      setTimeout(() => {
+        if (!get().isAwake) return;
+        set({ awakeningPhase: 'glow' });
+        
+        setTimeout(() => {
+          if (!get().isAwake) return;
+          // Sequence complete — trigger first interaction
+          window.dispatchEvent(new CustomEvent('pingu-awakened'));
+        }, 2000);
+      }, 2000);
+    }, 500);
+  },
+  
+  setLoadProgress: (progress) => {
+    set({ loadProgress: Math.max(0, Math.min(100, progress)), isLoadingModel: true });
+  },
 }));
 
 // ─── Convenience functions for mood transitions from other stores ──────────────
@@ -191,7 +304,7 @@ export function completeTask(): void {
   
   // Play "Noot noot!" sound effect if enabled — handled by PinguAvatar component
   try {
-    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQoGAAD/f39/+fj4/3l5eHd3dnV1dXRzc3JxcXFwcHBvb29vbm1tbGxra2pqaGhoaGdnZmZlZWVkZGRkY2NiYmFhYGBfX15eXFxYWFlYWFhWVlVUVEpLSkpKSkpKSUpKTExLTExLS0tLSEtLS0tLS0tLbCwsLCwsLCwMDAwLy8vLi4uLCwsKCgoJycmJiYmJiUlJSQkIyMjIyMjIyMiIiEhISAgHx8fHx8fHx8fHx4eHR0dHRwdHR0cHBvb29vbW1tbGxra2lpaWlsbCwsLCwqKioqKikpKSgoJycnJiYmJiYmJSUlJCQjIyMjIyMjIyIhISEgIB8fHx8fHx8eHh0dHRwcHBwcHBsbGxsbGRkZGRkZGRcXFxcXFRUVFRUVFBUVFBQUExMTExMTExMTExISEREQEA8PDw8PDw8PFhYWFhQUGRkZGRkZFhcXFxcVFhUWFRUVFBQUFBMTExMTExMTExISEhISEhMSEhISEhISEhISEhMTEhISEhISEhISEhMTEhISEhISEhISEhI=');
+    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQoGAAD/f39/+fj4/3l5eHd3dnV1dXRzc3JxcXFwcHBvb29vbm1tbGxra2pqaGhoaGdnZmZlZWVkZGRkY2NiYmFhYGBfX15eXFxYWFlYWFhWVlVUVEpLSkpKSkpKSUpKTExLTExLS0tLSEtLS0tLS0tLbCwsLCwsLCwMDAwLy8vLi4uLCwsKCgoJycmJiYmJiUlJSQkIyMjIyMjIyMiIiEhISAgHx8fHx8fHx8fHx4eHR0dHRwdHR0cHBvb29vbm1tbGxra2lpaWlsbCwsLCwqKioqKikpKSgoJycnJiYmJiYmJSUlJCQjIyMjIyMjIyIhISEgIB8fHx8fHx8eHh0dHRwcHBwcHBsbGxsbGRkZGRkZGRcXFxcXFRUVFRUVFBUVFBQUExMTExMTExMTExISEREQEA8PDw8PDw8PFhYWFhQUGRkZGRkZFhcXFxcVFhUWFRUVFBQUFBMTExMTExMTExISEhISEhMSEhISEhISEhISEhMTEhISEhISEhISEhMTEhISEhISEhISEhI=');
     audio.volume = 0.3;
     audio.play().catch(() => {}); // Silently ignore if autoplay blocked
   } catch {
