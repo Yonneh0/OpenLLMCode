@@ -10,9 +10,9 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
-    "isolatedModules": false,
+    "isolatedModules": true,
     "allowJs": true,
-    "noEmitOnError": false,
+    "noEmitOnError": true,
     "declaration": true,
     "rootDir": ".",
     "outDir": "./dist"

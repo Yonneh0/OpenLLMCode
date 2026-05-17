@@ -1,12 +1,8 @@
-// Preload script — exposes window.api for React components
-// With contextIsolation: false, this runs in the same context as the renderer (no isolated world)
+// Preload script — exposes window.api for React components via contextBridge (contextIsolation: true)
 
-import { ipcRenderer } from 'electron';
+import { ipcRenderer, contextBridge } from 'electron';
 
 export interface AppConfig { backend?: string; binarySource?: string; selectedModel?: string; systemAIModel?: string; hfToken?: string; }
-
-// Node.js globals (process, Buffer) are natively available in the renderer via nodeIntegration: true
-
 
 // ─── Exported types for renderer use ──────────────────────────────
 type Callback = (msg: unknown) => void;
@@ -83,7 +79,7 @@ interface Api {
      onEngineData: (callback: Callback) => () => void;
      onLogEntry: (callback: Callback) => () => void;
    };
-   appShutdown: () => Promise<void>;
+   appShutdown: () => Promise<boolean>;
 
    // MCP API — for renderer → main process IPC communication for MCP tools and tool names
    mcp?: {
@@ -171,8 +167,8 @@ declare global {
   }
 }
 
-// With contextIsolation: false, use direct window assignment instead of contextBridge
-window.api = {
+// Use contextBridge to expose the API in a contextIsolated world (contextIsolation: true)
+const api: Api & { qemu?: QemuAPI } = {
   // Engine Manager
   engine: {
     getConfig: () => ipcRenderer.invoke('engine-get-config') as Promise<AppConfig>,
@@ -311,28 +307,28 @@ window.api = {
 
     // ─── Pingu Phase 1-2: Model and binary loading IPC handlers ──────────────────────────────  
    pingu: {
-      downloadGguf: (opts: { url: string; quantization: string }) => 
-        ipcRenderer.invoke('pingu-download-gguf', opts).then((r: any) => ({ success: r.success, error: r.error })),
+     downloadGguf: (opts: { url: string; quantization: string }) => 
+       ipcRenderer.invoke('pingu-download-gguf', opts).then((r: any) => ({ success: r.success, error: r.error })),
 
-      loadGgufFromFile: (filePath: string, quantMode?: string) =>
-        ipcRenderer.invoke('pingu-load-gguf-file', { filePath, quantization: quantMode })
-          .then((r: any) => ({ success: r.success, destPath: r.destPath || undefined, error: r.error })),
+     loadGgufFromFile: (filePath: string, quantMode?: string) =>
+       ipcRenderer.invoke('pingu-load-gguf-file', { filePath, quantization: quantMode })
+         .then((r: any) => ({ success: r.success, destPath: r.destPath || undefined, error: r.error })),
 
-      selectGgufFile: () => ipcRenderer.invoke('pingu-select-gguf-file'),
-      
-      downloadLlamaCpp: () =>
-        ipcRenderer.invoke('pingu-download-llama-cpp').then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
+     selectGgufFile: () => ipcRenderer.invoke('pingu-select-gguf-file'),
+     
+     downloadLlamaCpp: () =>
+       ipcRenderer.invoke('pingu-download-llama-cpp').then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
 
-      installLlamaCppFromZip: (filePath: string) =>
-        ipcRenderer.invoke('pingu-install-llama-cpp-zip', { filePath })
-          .then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
+     installLlamaCppFromZip: (filePath: string) =>
+       ipcRenderer.invoke('pingu-install-llama-cpp-zip', { filePath })
+         .then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
 
-      selectLlamaCppZip: () => ipcRenderer.invoke('pingu-select-llama-zip'),
-      
-      getHardwareInfo: () => ipcRenderer.invoke('pingu-get-hardware-info'),
-    },
+     selectLlamaCppZip: () => ipcRenderer.invoke('pingu-select-llama-zip'),
+     
+     getHardwareInfo: () => ipcRenderer.invoke('pingu-get-hardware-info'),
+   },
 
-    // ─── Pingu Phase 4: Inference statistics listener (GGUF progress) — Bug #10 fix: validate data before callback ──────────────────────────────  
+    // ─── Pingu Phase 4: Inference statistics listener (GGUF progress) — validate data before callback ──────────────────────────────  
       onGgufProgress: (callback: (data: { percent: number; downloaded: number; total?: number }) => void) => {
         const handler = (_e: unknown, data: { percent?: number; downloaded?: number; total?: number } | undefined) => {
           if (!data || typeof data.percent !== 'number' || typeof data.downloaded !== 'number') return; // Validate before callback
@@ -342,63 +338,66 @@ window.api = {
        return () => ipcRenderer.removeListener('pingu-gguf-progress', handler);
       },
 
-    // ─── Pingu Phase 6: Model reload via prompt — Bug #16 fix: proper typed return ──────────────────────────────  
-    reloadModel: (opts: { backend: string; gpuLayers?: number; threads?: number; contextWindow?: number }) => ipcRenderer.invoke('pingu-reload-model', opts),
+    // ─── Pingu Phase 6: Model reload via prompt — proper typed return ──────────────────────────────  
+     reloadModel: (opts: { backend: string; gpuLayers?: number; threads?: number; contextWindow?: number }) => ipcRenderer.invoke('pingu-reload-model', opts),
 
-   // ─── QEMU/KVM Simulation Layer API ──────────────────────────────  
+    // ─── QEMU/KVM Simulation Layer API ──────────────────────────────  
    qemu: {
-    // VM lifecycle — per QMP commands from vm-run-state and monitor sections of QMP spec  
-    create: (config: Record<string, unknown>) => ipcRenderer.invoke('qemu-vm-create', config),
-    start: (vmId: string) => ipcRenderer.invoke('qemu-vm-start', vmId),
-    pause: (vmId: string) => ipcRenderer.invoke('qemu-vm-pause', vmId),
-    resume: (vmId: string) => ipcRenderer.invoke('qemu-vm-resume', vmId),
-    stop: (vmId: string) => ipcRenderer.invoke('qemu-vm-stop', vmId),
-    delete: (vmId: string) => ipcRenderer.invoke('qemu-vm-delete', vmId),
+     // VM lifecycle — per QMP commands from vm-run-state and monitor sections of QMP spec  
+     create: (config: Record<string, unknown>) => ipcRenderer.invoke('qemu-vm-create', config),
+     start: (vmId: string) => ipcRenderer.invoke('qemu-vm-start', vmId),
+     pause: (vmId: string) => ipcRenderer.invoke('qemu-vm-pause', vmId),
+     resume: (vmId: string) => ipcRenderer.invoke('qemu-vm-resume', vmId),
+     stop: (vmId: string) => ipcRenderer.invoke('qemu-vm-stop', vmId),
+     delete: (vmId: string) => ipcRenderer.invoke('qemu-vm-delete', vmId),
 
-    // QMP command execution — per the QEMU Machine Protocol Specification chapter's protocol specification section  
-    monitorSend: (vmId: string, command: string, args?: Record<string, unknown>) => 
-      ipcRenderer.invoke('qemu-monitor-send', vmId, command, args || {}),
+     // QMP command execution — per the QEMU Machine Protocol Specification chapter's protocol specification section  
+     monitorSend: (vmId: string, command: string, args?: Record<string, unknown>) => 
+       ipcRenderer.invoke('qemu-monitor-send', vmId, command, args || {}),
 
-    // Get all VM instances — returns copy to prevent mutation from renderer side  
-    listInstances: () => ipcRenderer.invoke('qemu-vm-list'),
+     // Get all VM instances — returns copy to prevent mutation from renderer side  
+     listInstances: () => ipcRenderer.invoke('qemu-vm-list'),
 
-    // QEMU-img operations — per the tools/qemu-img docs for disk image management in Tools chapter  
-    createDiskImage: (format: string, sizeMB: number, path: string) => 
-      ipcRenderer.invoke('qemu-img-create', format, sizeMB, path),
-    convertDiskImage: (srcFormat: string, dstFormat: string, srcPath: string, dstPath: string) => 
-      ipcRenderer.invoke('qemu-img-convert', srcFormat, dstFormat, srcPath, dstPath),
-    getDiskInfo: (path: string) => ipcRenderer.invoke('qemu-img-info', path),
+     // QEMU-img operations — per the tools/qemu-img docs for disk image management in Tools chapter  
+     createDiskImage: (format: string, sizeMB: number, path: string) => 
+       ipcRenderer.invoke('qemu-img-create', format, sizeMB, path),
+     convertDiskImage: (srcFormat: string, dstFormat: string, srcPath: string, dstPath: string) => 
+       ipcRenderer.invoke('qemu-img-convert', srcFormat, dstFormat, srcPath, dstPath),
+     getDiskInfo: (path: string) => ipcRenderer.invoke('qemu-img-info', path),
 
-    // Architecture discovery helpers — per -machine, -cpu help for each arch from QEMU docs  
-    getAvailableMachines: (arch: string) => ipcRenderer.invoke('qemu-get-available-machines', arch),
-    getAvailableCPUs: (arch: string) => ipcRenderer.invoke('qemu-get-available-cpus', arch),
+     // Architecture discovery helpers — per -machine, -cpu help for each arch from QEMU docs  
+     getAvailableMachines: (arch: string) => ipcRenderer.invoke('qemu-get-available-machines', arch),
+     getAvailableCPUs: (arch: string) => ipcRenderer.invoke('qemu-get-available-cpus', arch),
 
-    // Hotplug operations — per -machine cpu-hotplug and device_add docs  
-    hotplugCPU: (vmId: string, socketId: number) => ipcRenderer.invoke('qemu-hotplug-cpu', vmId, socketId),
-    addMemory: (vmId: string, sizeBytes: number) => ipcRenderer.invoke('qemu-add-memory', vmId, sizeBytes),
+     // Hotplug operations — per -machine cpu-hotplug and device_add docs  
+     hotplugCPU: (vmId: string, socketId: number) => ipcRenderer.invoke('qemu-hotplug-cpu', vmId, socketId),
+     addMemory: (vmId: string, sizeBytes: number) => ipcRenderer.invoke('qemu-add-memory', vmId, sizeBytes),
 
-    // Block device query — per QMP "query-block" command from block-devices section of QMP spec  
-    queryBlocks: (vmId: string) => ipcRenderer.invoke('qemu-query-blocks', vmId),
+     // Block device query — per QMP "query-block" command from block-devices section of QMP spec  
+     queryBlocks: (vmId: string) => ipcRenderer.invoke('qemu-query-blocks', vmId),
 
-    // Snapshot operations — per qcow2 snapshot support in Disk Images chapter and drive-mirror docs  
-    createSnapshot: (vmId: string, driveId: string) => ipcRenderer.invoke('qemu-create-snapshot', vmId, driveId),
+     // Snapshot operations — per qcow2 snapshot support in Disk Images chapter and drive-mirror docs  
+     createSnapshot: (vmId: string, driveId: string) => ipcRenderer.invoke('qemu-create-snapshot', vmId, driveId),
 
-    // KVM availability check — per kernel-irqchip and -enable-kvm docs (per /dev/kvm check in QEMU docs)
-    checkKVM: () => ipcRenderer.invoke('qemu-check-kvm-availability'),
+     // KVM availability check — per kernel-irqchip and -enable-kvm docs (per /dev/kvm check in QEMU docs)
+     checkKVM: () => ipcRenderer.invoke('qemu-check-kvm-availability'),
 
-    // Get available network backends — per -netdev help docs in Network Devices chapter  
-    getNetBackends: () => ipcRenderer.invoke('qemu-get-available-net-backends'),
+     // Get available network backends — per -netdev help docs in Network Devices chapter  
+     getNetBackends: () => ipcRenderer.invoke('qemu-get-available-net-backends'),
 
-    // Output stream subscription — per the VM run state docs, stdout/stderr carry guest OS console output
-    onQemuOutput: (callback: Callback) => {
-      const handler = (_e: unknown, data: unknown) => callback(data);
-      ipcRenderer.on('qemu-output', handler);
-      return () => ipcRenderer.removeListener('qemu-output', handler);
-    },
+     // Output stream subscription — per the VM run state docs, stdout/stderr carry guest OS console output
+     onQemuOutput: (callback: Callback) => {
+       const handler = (_e: unknown, data: unknown) => callback(data);
+       ipcRenderer.on('qemu-output', handler);
+       return () => ipcRenderer.removeListener('qemu-output', handler);
+     },
 
-    // Toolchain management — per-architecture toolchain download and caching from cross-compile docs  
-    listToolchains: () => ipcRenderer.invoke('qemu-toolchain-list'),
-    ensureToolchain: (arch: string) => ipcRenderer.invoke('qemu-toolchain-ensure', arch),
-    getProjectToolchains: (projectDir: string) => ipcRenderer.invoke('qemu-toolchain-project-config', projectDir),
-  },
+     // Toolchain management — per-architecture toolchain download and caching from cross-compile docs  
+     listToolchains: () => ipcRenderer.invoke('qemu-toolchain-list'),
+     ensureToolchain: (arch: string) => ipcRenderer.invoke('qemu-toolchain-ensure', arch),
+     getProjectToolchains: (projectDir: string) => ipcRenderer.invoke('qemu-toolchain-project-config', projectDir),
+   },
 };
+
+// Expose via contextBridge — this is the ONLY way to expose APIs when contextIsolation: true
+contextBridge.exposeInMainWorld('api', api);
