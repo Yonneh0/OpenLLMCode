@@ -5,6 +5,9 @@ import { spawn, spawnSync } from 'child_process';
 import * as os from 'os';
 import { app, ipcMain, dialog, BrowserWindow } from 'electron';
 
+// Track temp request files for cleanup on shutdown (Bug #5)
+const activeTempFiles: string[] = [];
+
 // ─── Pingu Phase 3 imports ──────────────────────────────
 import axios from 'axios';
 import { type ReleaseAsset, detectHardware, downloadBinary, getLatestReleases } from '../src/engine/manager';
@@ -418,17 +421,43 @@ function registerIpc() {
   // Chat / Inference — use full path to llama-server binary from engines dir
   let llamaServerPort = 8080;
 
+  /** Poll until the port becomes reachable (up to maxRetries). Returns true on success. */
+  function waitForServer(port: number, maxRetries = 30): Promise<boolean> {
+    return new Promise((resolve) => {
+      let retries = 0;
+      const attempt = () => {
+        import('net').then((netModule) => {
+          const socket = netModule.createConnection(port, '127.0.0.1', () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any — net.Socket type cast at runtime (per Node docs)
+            (socket as any).destroy();
+            resolve(true);
+          });
+          socket.on('error', () => {
+            retries++;
+            if (retries >= maxRetries) return resolve(false);
+            setTimeout(attempt, 100);
+          });
+        }).catch(() => {
+          retries++;
+          if (retries >= maxRetries) return resolve(false);
+          setTimeout(attempt, 100);
+        });
+      };
+      attempt();
+    });
+  }
+
    ipcMain.handle('chat-start', async (_e: any, payload: Record<string, string>): Promise<'started' | 'model-not-found'> => {
      const c = getPaths();
      const modelPath = pathModule.join(c.MODELS_DIR, payload.model || 'ibm-grok4-1b.Q8_0.gguf');
      if (!fs.existsSync(modelPath)) return 'model-not-found';
 
-      // Kill any existing llama-server on the port first — ensure process is cleaned up
-      if (llamaCppProcess) { 
-        try { llamaCppProcess.kill('SIGTERM'); } catch {}
-        setTimeout(() => { if (llamaCppProcess && !llamaCppProcess.killed) llamaCppProcess.kill('SIGTERM'); }, 2000);
-        llamaCppProcess = null;
-      }
+       // Kill any existing llama-server on the port first — ensure process is cleaned up
+       if (llamaCppProcess) { 
+         try { llamaCppProcess.kill('SIGTERM'); } catch {}
+         setTimeout(() => { if (llamaCppProcess && !llamaCppProcess.killed) llamaCppProcess.kill('SIGKILL'); }, 2000);
+         llamaCppProcess = null;
+       }
 
      const enginesDir = c.ENGINES_DIR;
      let serverBinary = 'llama-server';
@@ -519,6 +548,9 @@ function registerIpc() {
         const tmpFile = pathModule.join(appDataPath || os.tmpdir(), `llama-request-${Date.now()}.json`);
         fs.writeFileSync(tmpFile, JSON.stringify({ messages: [{ role: 'user' as const, content: message }], stream: true, temperature: 0.7, top_p: 0.9 }), 'utf-8');
         
+        // Track temp file for cleanup on shutdown (Bug #5 fix)
+        activeTempFiles.push(tmpFile);
+
         // Use curl with --data-binary @file for safe file reference — properly escape tempFile path to prevent injection
         const tmpFileArg = process.platform === 'win32' ? `"${tmpFile}"` : `\'${tmpFile}\'`;
         spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${llamaServerPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFileArg}`], { env: process.env });
@@ -534,7 +566,8 @@ function registerIpc() {
      try { llamaCppProcess.kill('SIGTERM'); } catch {}
      setTimeout(() => { 
        if (llamaCppProcess && !llamaCppProcess.killed) {
-         try { llamaCppProcess.kill('SIGTERM'); } catch {}
+         // Bug #9 fix: use SIGKILL for fallback kill instead of another SIGTERM
+         try { llamaCppProcess.kill('SIGKILL'); } catch {}
        }
        llamaCppProcess = null;
      }, 2000);
@@ -589,7 +622,10 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
         // Write request body to temp file — properly escape filename to prevent shell injection
         const tmpFile = pathModule.join(appDataPath || os.tmpdir(), `systemai-request-${Date.now()}.json`);
         fs.writeFileSync(tmpFile, JSON.stringify({ messages: [{ role: 'user' as const, content: message }], stream: true, temperature: 0.3, top_p: 0.9 }), 'utf-8');
-        
+
+        // Track temp file for cleanup on shutdown (Bug #5 fix)
+        activeTempFiles.push(tmpFile);
+
         // Use curl with --data-binary @file for safe file reference — properly escape tempFile path to prevent injection
         const tmpFileArg = process.platform === 'win32' ? `"${tmpFile}"` : `\'${tmpFile}\'`;
         spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${systemAIPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFileArg}`], { env: process.env });
@@ -603,7 +639,8 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
      try { systemAIProcess.kill('SIGTERM'); } catch {}
      setTimeout(() => { 
        if (systemAIProcess && !systemAIProcess.killed) {
-         try { systemAIProcess.kill("SIGTERM"); } catch {}
+         // Bug #9 fix: use SIGKILL for fallback kill instead of another SIGTERM
+         try { systemAIProcess.kill('SIGKILL'); } catch {}
        }
        systemAIProcess = null;
      }, 2000);
@@ -684,8 +721,9 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
     if (Array.isArray(diskImages)) {
       for (const disk of diskImages) {
         if (disk.isNew && !disk.file) {
-          // Create a new qcow2 disk image via qemu-img before VM creation
-          const tmpDir = process.env.TEMP || '/tmp';
+          // Bug #10 fix: use platform-appropriate temp directory (TEMP on Windows, TMPDIR on macOS)
+          const tmpDir = process.platform === 'win32' ? (process.env.TEMP ?? os.tmpdir()) 
+            : (process.env.TMPDIR || os.tmpdir());
           const diskPath = pathModule.join(tmpDir, `openllmcode-${config.id}-${Date.now()}.qcow2`);
           
           try {
@@ -1153,13 +1191,22 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
      
      return { success: true };
    });
-   // ─── App shutdown cleanup — extended for QEMU processes ──────────────────────────────  
+   // ─── App shutdown cleanup — extended for QEMU processes and temp file GC ──────────────────────────────  
    ipcMain.handle('app-shutdown', () => {
      stopFileWatcher();
      if (llamaCppProcess) llamaCppProcess.kill('SIGTERM');
      if (systemAIProcess) systemAIProcess.kill('SIGTERM');
-     try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any — QEMU cleanup on shutdown
-     return true;
+     
+      // Bug #5 fix: clean up all tracked temp files on shutdown
+      for (const tf of activeTempFiles) {
+        try { fs.unlinkSync(tf); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any — safe to ignore on cleanup failure
+      }
+      activeTempFiles.length = 0;
+      
+      // QEMU cleanup on shutdown
+      try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any — QEMU cleanup on shutdown
+      
+      return true;
    });
 
 }
@@ -1187,7 +1234,7 @@ function createMainWindow() {
      // In production (asar=false on Windows), electron-builder copies "dist/**/*" into <appDir>/resources/app/
      // __dirname points to <appDir>/resources/app/electron/ — so ".." goes to resourcesPath, then dist/index.html.
      // Vite output: index.html at resourcesPath/dist/index.html, assets at resourcesPath/dist/assets/
-     mainWindow.loadFile(pathModule.join(__dirname, '..', 'dist', 'index.html'));
+      mainWindow.loadFile(pathModule.join(__dirname, '..', 'dist', 'index.html'));
    }
 
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -1206,16 +1253,25 @@ if (process.env.ELECTRON_RUN_AS_NODE || process.type === 'renderer') {
 } else if (app && typeof app.whenReady === 'function') {
   // Normal Electron main process path — start the application
   app.whenReady().then(startApp);
-  app.on('window-all-closed', () => { 
-    stopFileWatcher();
-    if (process.platform !== 'darwin') app.quit(); 
-  });
-    app.on('will-quit', () => {
+    app.on('window-all-closed', () => { 
       stopFileWatcher();
-      if (llamaCppProcess) llamaCppProcess.kill('SIGTERM');
-      if (systemAIProcess) systemAIProcess.kill("SIGTERM");
-      try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any — QEMU cleanup on shutdown (redundant with will-quit above, kept for safety)
+      if (process.platform !== 'darwin') app.quit(); 
     });
+    // Bug #4 fix: unified cleanup on will-quit to prevent temp file / QEMU process leaks.
+    // Previously only app-shutdown IPC handler cleaned up — SIGTERM/SIGKILL could leave resources behind.
+        app.on('will-quit', () => {
+          stopFileWatcher();
+          if (llamaCppProcess) llamaCppProcess.kill('SIGTERM');
+          if (systemAIProcess) systemAIProcess.kill("SIGTERM");
+          
+          // Bug #4 fix: also clean up tracked temp files on will-quit
+          for (const tf of activeTempFiles) {
+            try { fs.unlinkSync(tf); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any — safe to ignore on cleanup failure
+          }
+          activeTempFiles.length = 0;
+          
+          try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any — QEMU cleanup on shutdown
+        });
 } else {
   console.log('[main] Skipping Electron startup: not in Electron runtime');
 }
