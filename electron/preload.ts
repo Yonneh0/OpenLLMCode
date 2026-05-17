@@ -90,6 +90,30 @@ interface Api {
      getToolNames: () => Promise<string[]>;
      callTool: (toolName: string, params?: Record<string, unknown>) => Promise<unknown>;
    };
+
+   // ─── Pingu Phase 1-2: Model and binary loading ──────────────────────────────  
+   pingu: {
+     downloadGguf: (opts: { url: string; quantization: string; onProgress?: (pct: number) => void }) => 
+       Promise<{ success: boolean; error?: string }>;
+     loadGgufFromFile: (filePath: string, quantMode?: string) => 
+       Promise<{ success: boolean; destPath?: string; error?: string }>;
+     selectGgufFile: () => Promise<string | null>;
+     
+     downloadLlamaCpp: () => 
+       Promise<{ success: boolean; extracted?: string; error?: string }>;
+     installLlamaCppFromZip: (filePath: string) => 
+       Promise<{ success: boolean; extracted?: string; error?: string }>;
+     selectLlamaCppZip: () => Promise<string | null>;
+     
+     getHardwareInfo: () => Promise<{ platform: string; gpu?: string; ramGB: number; hasLlamaCpp: boolean }>;
+   };
+
+   // ─── Pingu Phase 4: Inference statistics listener ──────────────────────────────  
+   onGgufProgress: (callback: (data: { percent: number; downloaded: number; total?: number }) => void) => () => void;
+
+   // ─── Pingu Phase 6: Model reload via prompt ──────────────────────────────  
+   reloadModel: (opts: { backend: string; gpuLayers?: number; threads?: number; contextWindow?: number }) => 
+     Promise<{ success: boolean; error?: string }>;
  }
 
 // QEMU/KVM Simulation Layer API types — mirrors the IPC handler signatures in preload.ts  
@@ -284,6 +308,42 @@ window.api = {
      callTool: (toolName: string, params?: Record<string, unknown>) => 
        ipcRenderer.invoke('mcp-call-tool', toolName, params || {}),
    },
+
+   // ─── Pingu Phase 1-2: Model and binary loading IPC handlers ──────────────────────────────  
+   pingu: {
+     downloadGguf: (opts) => 
+       ipcRenderer.invoke('pingu-download-gguf', opts).then((r: any) => ({ success: r.success, error: r.error })),
+
+     loadGgufFromFile: (filePath, quantMode?) =>
+       ipcRenderer.invoke('pingu-load-gguf-file', { filePath, quantization: quantMode })
+         .then((r: any) => ({ success: r.success, destPath: r.destPath || undefined, error: r.error })),
+
+     selectGgufFile: () => ipcRenderer.invoke('pingu-select-gguf-file'),
+     
+     downloadLlamaCpp: () =>
+       ipcRenderer.invoke('pingu-download-llama-cpp').then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
+
+     installLlamaCppFromZip: (filePath) =>
+       ipcRenderer.invoke('pingu-install-llama-cpp-zip', { filePath })
+         .then((r: any) => ({ success: r.success, extracted: r.extracted, error: r.error })),
+
+     selectLlamaCppZip: () => ipcRenderer.invoke('pingu-select-llama-zip'),
+     
+     getHardwareInfo: () => ipcRenderer.invoke('pingu-get-hardware-info'),
+   },
+
+   // ─── Pingu Phase 4: Inference statistics listener (GGUF progress) — Bug #10 fix: validate data before callback ──────────────────────────────  
+     onGgufProgress: (callback: (data: { percent: number; downloaded: number; total?: number }) => void) => {
+       const handler = (_e: unknown, data: { percent?: number; downloaded?: number; total?: number } | undefined) => {
+         if (!data || typeof data.percent !== 'number' || typeof data.downloaded !== 'number') return; // Validate before callback
+         callback({ percent: data.percent, downloaded: data.downloaded, total: data.total });
+       };
+      ipcRenderer.on('pingu-gguf-progress', handler);
+      return () => ipcRenderer.removeListener('pingu-gguf-progress', handler);
+     },
+
+   // ─── Pingu Phase 6: Model reload via prompt — Bug #16 fix: proper typed return ──────────────────────────────  
+   reloadModel: (opts) => ipcRenderer.invoke('pingu-reload-model', opts),
 
    // ─── QEMU/KVM Simulation Layer API ──────────────────────────────  
    qemu: {

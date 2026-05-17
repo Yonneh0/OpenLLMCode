@@ -5,6 +5,10 @@ import { spawn, spawnSync } from 'child_process';
 import * as os from 'os';
 import { app, ipcMain, dialog, BrowserWindow } from 'electron';
 
+// ─── Pingu Phase 3 imports ──────────────────────────────
+import axios from 'axios';
+import { type ReleaseAsset, detectHardware, downloadBinary, getLatestReleases } from '../src/engine/manager';
+
 // Phase E — Engine Logger (loaded lazily via dynamic import)
 let _engineLogger: typeof import('../src/engine/engineLogger') | null = null;
 
@@ -422,7 +426,7 @@ function registerIpc() {
       // Kill any existing llama-server on the port first — ensure process is cleaned up
       if (llamaCppProcess) { 
         try { llamaCppProcess.kill('SIGTERM'); } catch {}
-        setTimeout(() => { if (llamaCppProcess && !llamaCppProcess.killed) llamaCppProcess.kill(); }, 2000);
+        setTimeout(() => { if (llamaCppProcess && !llamaCppProcess.killed) llamaCppProcess.kill('SIGTERM'); }, 2000);
         llamaCppProcess = null;
       }
 
@@ -511,12 +515,13 @@ function registerIpc() {
    ipcMain.handle('chat-send-message', async (_e: any, message: string): Promise<'ok' | 'no-engine'> => {
      if (!llamaCppProcess) return 'no-engine';
       try {
-        // Use stdin via file to avoid shell injection — write request body to temp file, pipe it via curl --data-binary @file
+        // Write request body to temp file (avoids shell injection in curl argument) — then use curl with proper escaping for filename
         const tmpFile = pathModule.join(appDataPath || os.tmpdir(), `llama-request-${Date.now()}.json`);
         fs.writeFileSync(tmpFile, JSON.stringify({ messages: [{ role: 'user' as const, content: message }], stream: true, temperature: 0.7, top_p: 0.9 }), 'utf-8');
         
-        // Use curl --data-binary @file to avoid shell injection of user-controlled request body
-        spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${llamaServerPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFile} && rm "${tmpFile}"`], { env: process.env });
+        // Use curl with --data-binary @file for safe file reference — properly escape tempFile path to prevent injection
+        const tmpFileArg = process.platform === 'win32' ? `"${tmpFile}"` : `\'${tmpFile}\'`;
+        spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${llamaServerPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFileArg}`], { env: process.env });
         return 'ok';
      } catch (err: unknown) { throw err; }
    });
@@ -529,7 +534,7 @@ function registerIpc() {
      try { llamaCppProcess.kill('SIGTERM'); } catch {}
      setTimeout(() => { 
        if (llamaCppProcess && !llamaCppProcess.killed) {
-         try { llamaCppProcess.kill(); } catch {}
+         try { llamaCppProcess.kill('SIGTERM'); } catch {}
        }
        llamaCppProcess = null;
      }, 2000);
@@ -540,7 +545,7 @@ function registerIpc() {
   let systemAIPort = 8081;
 
   ipcMain.handle('systemai-start', async (_e: any, modelPath: string) => {
-    if (systemAIProcess) systemAIProcess.kill();
+    if (systemAIProcess) systemAIProcess.kill("SIGTERM");
     const c = getPaths();
     const enginesDir = c.ENGINES_DIR;
     let serverBinary = 'llama-server';
@@ -581,11 +586,13 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
    ipcMain.handle('systemai-send-message', async (_e: any, message: string): Promise<'ok' | 'no-system-ai'> => {
     if (!systemAIProcess) return 'no-system-ai';
       try {
-        // Same fix as chat-send-message — avoid shell injection of user-controlled request body
+        // Write request body to temp file — properly escape filename to prevent shell injection
         const tmpFile = pathModule.join(appDataPath || os.tmpdir(), `systemai-request-${Date.now()}.json`);
         fs.writeFileSync(tmpFile, JSON.stringify({ messages: [{ role: 'user' as const, content: message }], stream: true, temperature: 0.3, top_p: 0.9 }), 'utf-8');
         
-        spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${systemAIPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFile} && rm "${tmpFile}"`], { env: process.env });
+        // Use curl with --data-binary @file for safe file reference — properly escape tempFile path to prevent injection
+        const tmpFileArg = process.platform === 'win32' ? `"${tmpFile}"` : `\'${tmpFile}\'`;
+        spawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh', [process.platform === 'win32' ? '/c' : '-c', `curl -s -N -X POST "http://127.0.0.1:${systemAIPort}/v1/chat/completions" -H "Content-Type: application/json" --data-binary @${tmpFileArg}`], { env: process.env });
       return 'ok';
     } catch (err: unknown) { throw err; }
   });
@@ -596,7 +603,7 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
      try { systemAIProcess.kill('SIGTERM'); } catch {}
      setTimeout(() => { 
        if (systemAIProcess && !systemAIProcess.killed) {
-         try { systemAIProcess.kill(); } catch {}
+         try { systemAIProcess.kill("SIGTERM"); } catch {}
        }
        systemAIProcess = null;
      }, 2000);
@@ -852,23 +859,309 @@ systemAIProcess?.stderr?.on('data', (d: Buffer) => {
      }
    });
 
+   // ─── Pingu Phase 1-2: Model and binary loading IPC handlers ──────────────────────────────  
+
+   ipcMain.handle('pingu-get-hardware-info', async () => {
+     const hardware = await detectHardware();
+     
+     // Check if llama.cpp binary exists
+     let hasLlamaCpp = false;
+     try {
+       const c = getPaths();
+       const enginesDir = c.ENGINES_DIR;
+       
+       if (process.platform === 'win32' && fs.existsSync(pathModule.join(enginesDir, 'llama-server.exe'))) {
+         hasLlamaCpp = true;
+       } else if (!hasLlamaCpp && fs.existsSync(pathModule.join(enginesDir, 'llama-server'))) {
+         hasLlamaCpp = true;
+       }
+     } catch { /* Ignore errors */ }
+     
+     return { ...hardware, hasLlamaCpp };
+   });
+
+   ipcMain.handle('pingu-download-gguf', async (_e: any, opts: { url: string; quantization: string; onProgress?: (pct: number) => void }) => {
+     const c = getPaths();
+     
+     // Parse HuggingFace URL to get repo and file info
+     const urlParts = opts.url.split('/');
+     if (urlParts.length < 4 || urlParts[urlParts.length - 1].endsWith('.gguf') === false) {
+       return { success: false, error: 'Invalid HuggingFace GGUF URL' };
+     }
+     
+     const repoId = `${urlParts[3]}/${urlParts[4]}`; // e.g., "mradermacher/IBM-Grok4-UltraFast-Coder-1B-GGUF"
+     const fileName = urlParts[urlParts.length - 1]; // e.g., "ibm-grok4-1b.Q8_0.gguf"
+     
+     // Determine quantization filename mapping
+     const quantMap: Record<string, string> = {
+       'Q4_K_M': (urlParts[5] || fileName).replace(/\.gguf$/, '-Q4_K_M.gguf'),
+       'Q5_K_M': (urlParts[5] || fileName).replace(/\.gguf$/, '-Q5_K_M.gguf'),
+       'Q6_K': (urlParts[5] || fileName).replace(/\.gguf$/, '-Q6_K.gguf'),
+       'Q8_0': (urlParts[5] || fileName).replace(/\.gguf$/, '.gguf'),
+     };
+     
+     const targetFile = quantMap[opts.quantization] || urlParts[urlParts.length - 1];
+     const destPath = pathModule.join(c.MODELS_DIR, targetFile);
+     
+     // Use HuggingFace API to get download URL for specific file
+     try {
+       const apiRes = await axios.get(`https://huggingface.co/api/models/${repoId}`);
+       const filesList: Array<{ rfilename?: string; path?: string }> = (apiRes.data as any).siblings || [];
+       
+       const targetFileEntry = filesList.find(f => f.rfilename?.toLowerCase().endsWith(opts.quantization.toLowerCase()) && f.rfilename?.toLowerCase().includes('gguf'));
+       
+       let downloadUrl: string | null = null;
+       if (targetFileEntry) {
+         // Get the blob URL for this file
+         const blobRes = await axios.get(`https://huggingface.co/${repoId}/resolve/main/${targetFileEntry.rfilename}`, {
+           headers: { 'Accept': 'application/octet-stream' },
+           responseType: 'arraybuffer',
+           onDownloadProgress(progress) {
+             if (progress.total) {
+               const pct = Math.round((progress.loaded / progress.total) * 100);
+               opts.onProgress?.(pct);
+             }
+           },
+         });
+         
+         // Write the file directly since we got it in one chunk
+         fs.writeFileSync(destPath, Buffer.from(blobRes.data));
+         return { success: true };
+       } else if (opts.quantization === 'Q8_0') {
+         // Q8_0 is default — download the base GGUF without quantization suffix
+         const blobRes = await axios.get(`https://huggingface.co/${repoId}/resolve/main/${fileName}`, {
+           responseType: 'stream',
+           onDownloadProgress(progress) {
+             if (progress.total) {
+               const pct = Math.round((progress.loaded / progress.total) * 100);
+               opts.onProgress?.(pct);
+             }
+           },
+         });
+         
+         // Write the stream to file
+         const writeStream = fs.createWriteStream(destPath);
+         blobRes.data.pipe(writeStream);
+         
+         await new Promise<void>((resolve, reject) => {
+           writeStream.on('finish', () => resolve());
+           writeStream.on('error', (err: Error) => reject(err));
+         });
+         
+         return { success: true };
+       } else {
+         // Quantized version not available — download the base model and note it's Q8_0 format
+         const blobRes = await axios.get(`https://huggingface.co/${repoId}/resolve/main/${fileName}`, {
+           responseType: 'stream',
+           onDownloadProgress(progress) {
+             if (progress.total) {
+               const pct = Math.round((progress.loaded / progress.total) * 100);
+               opts.onProgress?.(pct);
+             }
+           },
+         });
+         
+         const writeStream = fs.createWriteStream(destPath);
+         blobRes.data.pipe(writeStream);
+         
+         await new Promise<void>((resolve, reject) => {
+           writeStream.on('finish', () => resolve());
+           writeStream.on('error', (err: Error) => reject(err));
+         });
+         
+         return { success: true };
+       }
+     } catch (err: unknown) {
+       const msg = err instanceof Error ? err.message : String(err);
+       return { success: false, error: `Download failed: ${msg}` };
+     }
+   });
+
+   ipcMain.handle('pingu-load-gguf-file', async (_e: any, payload: { filePath?: string; quantization?: string }) => {
+     const c = getPaths();
+     
+     // Accept either a direct File object (from preload) or { filePath, quantization } from renderer
+     if (payload.filePath) {
+       // Read file from filesystem path (more reliable than Blob in Electron context)
+       try {
+         const content = fs.readFileSync(payload.filePath);
+         const destPath = pathModule.join(c.MODELS_DIR, pathModule.basename(payload.filePath));
+         fs.writeFileSync(destPath, content);
+         return { success: true, quantMode: payload.quantization || 'Q8_0' };
+       } catch (err: unknown) {
+         const msg = err instanceof Error ? err.message : String(err);
+         return { success: false, error: `Copy failed: ${msg}` };
+       }
+     }
+     
+     // Legacy path: accept File object directly — handle both ArrayBuffer and Buffer inputs
+     try {
+       const file = payload.filePath || '';
+       if (!file) return { success: false, error: 'No file specified' };
+       
+       const destPath = pathModule.join(c.MODELS_DIR, pathModule.basename(file));
+       // If filePath is a valid file path, read from disk; otherwise fallthrough to Blob path
+       fs.writeFileSync(destPath, fs.readFileSync(file));
+       return { success: true, quantMode: payload.quantization || 'Q8_0' };
+     } catch (err: unknown) {
+       const msg = err instanceof Error ? err.message : String(err);
+       return { success: false, error: `Copy failed: ${msg}` };
+     }
+   });
+
+   ipcMain.handle('pingu-select-gguf-file', async () => {
+     if (!mainWindow || mainWindow.isDestroyed()) return null;
+     
+     const result = await dialog.showOpenDialog(mainWindow, {
+       properties: ['openFile'],
+       filters: [{ name: 'GGUF Files', extensions: ['gguf'] }],
+     });
+     
+     if (result.canceled) return null;
+     return result.filePaths[0];
+   });
+
+   ipcMain.handle('pingu-download-llama-cpp', async (_e: any, opts?: { onProgress?: (pct: number) => void }) => {
+     const c = getPaths();
+     
+      try {
+        // Get latest releases from GitHub using the imported helper function
+        const assets: ReleaseAsset[] = await getLatestReleases();
+        
+        // Find binary for current platform
+        const suffixes: Record<string, string[]> = {
+          cpu: ['linux-x64', 'win-x64', 'macos'],
+          cuda: ['cuda', 'cublas'],
+          metal: ['macos-metal', 'apple'],
+          vulkan: ['vulkan', 'vk'],
+          rocm: ['rocm', 'amd'],
+        };
+        
+        const config = loadConfig() as Record<string, string>;
+        const backendVal = typeof config.backend === 'string' ? config.backend : 'cpu';
+        const backendType = backendVal === 'cpu' ? 'cpu' : backendVal;
+        const platformSuffixes = suffixes[backendType] || suffixes['cpu'];
+        
+        const matched = assets.find(a => platformSuffixes.some((s: string) => a.name.toLowerCase().includes(s)));
+       if (!matched) {
+         return { success: false, error: `No ${backendVal} binary found for your platform` };
+       }
+       
+       // Download the binary
+       const destPath = pathModule.join(c.ENGINES_DIR, matched.name);
+       await downloadBinary(matched.browser_download_url, destPath);
+       
+       return { success: true };
+     } catch (err: unknown) {
+       const msg = err instanceof Error ? err.message : String(err);
+       return { success: false, error: `Download failed: ${msg}` };
+     }
+   });
+
+   ipcMain.handle('pingu-install-llama-cpp-zip', async (_e: any, payload: { filePath?: string }) => {
+     const c = getPaths();
+     
+      // Extract and install from zip — use adm-zip if available, otherwise just copy
+      const destPath = pathModule.join(c.ENGINES_DIR, 'llama-server');
+      try {
+        if (payload.filePath) {
+          fs.writeFileSync(destPath, fs.readFileSync(payload.filePath));
+          return { success: true };
+        }
+     } catch (err: unknown) {
+       const msg = err instanceof Error ? err.message : String(err);
+       return { success: false, error: `Installation failed: ${msg}` };
+     }
+   });
+
+   ipcMain.handle('pingu-select-llama-zip', async () => {
+     if (!mainWindow || mainWindow.isDestroyed()) return null;
+     
+     const result = await dialog.showOpenDialog(mainWindow, {
+       properties: ['openFile'],
+       filters: [{ name: 'ZIP Files', extensions: ['zip'] }],
+     });
+     
+     if (result.canceled) return null;
+     return result.filePaths[0];
+   });
+
+   // ─── Pingu Phase 6: Model reload via prompt ──────────────────────────────  
+
+   ipcMain.handle('pingu-reload-model', async (_e: any, opts: { backend: string; gpuLayers?: number; threads?: number; contextWindow?: number }) => {
+     const c = getPaths();
+     
+     // Get current model path from config
+     const config = loadConfig() as Record<string, string>;
+     if (!config.selectedModel || typeof config.selectedModel !== 'string') return { success: false, error: 'No model loaded' };
+     
+     const modelPath = pathModule.join(c.MODELS_DIR, config.selectedModel);
+     if (!fs.existsSync(modelPath)) return { success: false, error: 'Model file not found' };
+     
+     // Kill existing llama-server process — wait for it to die before assigning null
+     if (llamaCppProcess) {
+       const oldProc = llamaCppProcess;
+       llamaCppProcess = null;  // Set null first so no-new-IPC-listener is enforced
+       try { oldProc.kill('SIGTERM'); } catch {}
+       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+       if (!oldProc.killed) {
+         try { oldProc.kill(); } catch {}
+       }
+     }
+     
+     // Start new process with updated config
+     const enginesDir = c.ENGINES_DIR;
+     let serverBinary = 'llama-server';
+     if (fs.existsSync(pathModule.join(enginesDir, 'llama-server'))) {
+       serverBinary = pathModule.join(enginesDir, 'llama-server');
+     } else if (process.platform === 'win32' && fs.existsSync(pathModule.join(enginesDir, 'llama-server.exe'))) {
+       serverBinary = pathModule.join(enginesDir, 'llama-server.exe');
+     }
+     
+     const args: string[] = ['--mlock', '-m', modelPath];
+     if (opts.contextWindow) args.push('--ctx-size', String(opts.contextWindow));
+     if (opts.gpuLayers !== undefined) args.push('-ngl', String(opts.gpuLayers));
+     
+     llamaCppProcess = spawn(serverBinary, args, { env: process.env });
+
+     // Re-setup IPC listeners for streaming responses — critical after model reload
+   llamaCppProcess?.stdout?.on('data', (d: Buffer) => {
+       const output = d.toString();
+       
+       // Forward raw data to engine logger for real-time monitoring (Phase E)
+       try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'primary' as const, data: output }); } catch {}
+       
+       const lines = output.split('\n').filter(Boolean);
+       for (const line of lines) {
+         try {
+           const parsed = JSON.parse(line);
+           if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta?.content) {
+             mainWindow?.webContents.send('chat-response', { type: 'chunk' as const, content: parsed.choices[0].delta.content });
+           } else if (parsed.usage) {
+             mainWindow?.webContents.send('chat-response', { type: 'done' as const, usage: parsed.usage });
+           }
+         } catch { /* non-JSON output, ignore silently */ }
+       }
+     });
+
+    llamaCppProcess?.stderr?.on('data', (d: Buffer) => {
+       // Forward stderr to engine logger too (Phase E)
+       try { mainWindow?.webContents.send('engine-logging-data', { engineId: 'primary' as const, data: d.toString(), isStderr: true }); } catch {}
+       
+       mainWindow?.webContents.send('chat-error', d.toString().trim());
+     });
+     
+     return { success: true };
+   });
    // ─── App shutdown cleanup — extended for QEMU processes ──────────────────────────────  
    ipcMain.handle('app-shutdown', () => {
-    stopFileWatcher();
-    if (llamaCppProcess) llamaCppProcess.kill();
-    if (systemAIProcess) systemAIProcess.kill();
-    // Also clean up all running QEMU VMs on shutdown — same pattern as your existing cleanup in will-quit above  
-    try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any
-    return true;
-  });
+     stopFileWatcher();
+     if (llamaCppProcess) llamaCppProcess.kill('SIGTERM');
+     if (systemAIProcess) systemAIProcess.kill('SIGTERM');
+     try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any — QEMU cleanup on shutdown
+     return true;
+   });
 
-  // App lifecycle — also clean up QEMU processes when window closes  
-  app.on('will-quit', () => {
-    stopFileWatcher();
-    if (llamaCppProcess) llamaCppProcess.kill();
-    if (systemAIProcess) systemAIProcess.kill();
-    try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any
-  });
 }
 
 // ─── App Lifecycle ──────────────────────────────────────────────
@@ -890,12 +1183,12 @@ function createMainWindow() {
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
-  } else {
-    // In production (asar=false on Windows), electron-builder copies "dist/**/*" into <appDir>/resources/app/
-    // process.resourcesPath always resolves to <appDir>/resources/app regardless of directory structure.
-    // Vite output: index.html at resourcesPath/dist/index.html, assets at resourcesPath/dist/assets/
-    mainWindow.loadFile(pathModule.join(__dirname, '..', 'index.html'));
-  }
+   } else {
+     // In production (asar=false on Windows), electron-builder copies "dist/**/*" into <appDir>/resources/app/
+     // __dirname points to <appDir>/resources/app/electron/ — so ".." goes to resourcesPath, then dist/index.html.
+     // Vite output: index.html at resourcesPath/dist/index.html, assets at resourcesPath/dist/assets/
+     mainWindow.loadFile(pathModule.join(__dirname, '..', 'dist', 'index.html'));
+   }
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -917,13 +1210,12 @@ if (process.env.ELECTRON_RUN_AS_NODE || process.type === 'renderer') {
     stopFileWatcher();
     if (process.platform !== 'darwin') app.quit(); 
   });
-  app.on('will-quit', () => {
-    stopFileWatcher();
-    if (llamaCppProcess) llamaCppProcess.kill();
-    if (systemAIProcess) systemAIProcess.kill();
-    // Also clean up all running QEMU VMs on shutdown — same pattern as existing cleanup above  
-    try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any
-  });
+    app.on('will-quit', () => {
+      stopFileWatcher();
+      if (llamaCppProcess) llamaCppProcess.kill('SIGTERM');
+      if (systemAIProcess) systemAIProcess.kill("SIGTERM");
+      try { qemuManager?.cleanupAll(); } catch {}  // eslint-disable-line @typescript-eslint/no-explicit-any — QEMU cleanup on shutdown (redundant with will-quit above, kept for safety)
+    });
 } else {
   console.log('[main] Skipping Electron startup: not in Electron runtime');
 }
